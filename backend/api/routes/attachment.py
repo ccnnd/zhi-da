@@ -147,7 +147,7 @@ async def delete_attachment(
 
 @router.get("/api/enterprise/candidates/{student_id}/attachments")
 async def enterprise_view_attachments(
-    student_id: int,
+    student_id: str,
     enterprise_id: str = Query(...),
     auth_id: str = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -157,10 +157,12 @@ async def enterprise_view_attachments(
     if identity.role != "enterprise" or identity.enterprise_id != enterprise_id:
         raise HTTPException(403, "无权访问")
 
+    sid = int(student_id)
+
     # 校验授权状态
     auth_result = await db.execute(
         select(StudentAuthorization).where(
-            StudentAuthorization.student_id == student_id,
+            StudentAuthorization.student_id == sid,
             StudentAuthorization.enterprise_id == enterprise_id,
             StudentAuthorization.status == "active",
         )
@@ -170,7 +172,7 @@ async def enterprise_view_attachments(
 
     result = await db.execute(
         select(StudentAttachment)
-        .where(StudentAttachment.student_id == student_id)
+        .where(StudentAttachment.student_id == sid)
         .order_by(StudentAttachment.uploaded_at.desc())
     )
     rows = result.scalars().all()
@@ -189,7 +191,7 @@ async def enterprise_view_attachments(
 
 @router.get("/api/enterprise/candidates/{student_id}/attachments/{attachment_id}/download")
 async def enterprise_download_attachment(
-    student_id: int,
+    student_id: str,
     attachment_id: str,
     enterprise_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -199,10 +201,12 @@ async def enterprise_download_attachment(
     if identity.role != "enterprise" or identity.enterprise_id != enterprise_id:
         raise HTTPException(403, "无权访问")
 
+    sid = int(student_id)
+
     # 校验授权
     auth_result = await db.execute(
         select(StudentAuthorization).where(
-            StudentAuthorization.student_id == student_id,
+            StudentAuthorization.student_id == sid,
             StudentAuthorization.enterprise_id == enterprise_id,
             StudentAuthorization.status == "active",
         )
@@ -213,7 +217,7 @@ async def enterprise_download_attachment(
     att_result = await db.execute(
         select(StudentAttachment).where(
             StudentAttachment.id == attachment_id,
-            StudentAttachment.student_id == student_id,
+            StudentAttachment.student_id == sid,
         )
     )
     att = att_result.scalar_one_or_none()

@@ -149,6 +149,12 @@ export default function Home() {
   }
 
   const handleCreateStudent = () => {
+    // 清除旧的学生数据，避免 "新用户" 流程中恢复旧档案
+    localStorage.removeItem('student_data')
+    localStorage.removeItem('student_id')
+    localStorage.removeItem('zhida_student_id')
+    // 同时清除 appStore 中的旧状态
+    setStudent(null)
     setRole('student')
     navigate('/student/input')
   }

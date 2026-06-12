@@ -184,7 +184,7 @@ class ProfileStep(PipelineStep):
                 f"学业基础: {json.dumps(student_info.get('academic_foundation', {}), ensure_ascii=False)} "
                 f"软技能证据: {json.dumps(student_info.get('soft_skill_evidence', {}), ensure_ascii=False)} "
                 f"{exp_context} {extra_context}")
-        response = await llm.complete(messages)
+        response = await llm.complete(messages, max_tokens=2000)
         data, error = SchemaValidator.validate_json_output(response.content)
         if data and not error:
             data = SchemaValidator.validate_ability_scores(data)
@@ -302,7 +302,7 @@ class MatchStep(PipelineStep):
         )
 
         messages = ContextBuilder.build_user_prompt(state, system_instructions)
-        response = await llm.complete(messages)
+        response = await llm.complete(messages, max_tokens=2000)
         data, error = SchemaValidator.validate_json_output(response.content)
 
         if data and not error:
@@ -381,7 +381,7 @@ class PathStep(PipelineStep):
                 "3. expected_impact: 预期对各维度的提升幅度（0-1之间小数）\n\n"
                 "输出严格JSON: {phases: [{goal, weeks: 数字, tasks: [{name, description, resources: [链接], criteria, linked_gap, target_dimension, expected_impact: {维度名: 提升值}}]}]}，包含2-3个阶段。",
                 f"差距: {json.dumps(gaps, ensure_ascii=False)}")
-        response = await llm.complete(messages)
+        response = await llm.complete(messages, max_tokens=2000)
         data, error = SchemaValidator.validate_json_output(response.content)
         if data and not error:
             state.set("growth_path", data)
@@ -403,7 +403,7 @@ class AdviceStep(PipelineStep):
                 f"请基于学生的能力画像和岗位匹配结果，生成职业发展建议和就业指导。\n"
                 f"当前画像置信度为 {profile_confidence}，如果置信度较低，请在建议中提醒学生补充更多信息。\n"
                 "输出严格JSON: {career_advice: 文本, recommended_directions: [方向], ai_reasoning: {每个建议的推理依据和置信度}}")
-        response = await llm.complete(messages)
+        response = await llm.complete(messages, max_tokens=1500)
         data, error = SchemaValidator.validate_json_output(response.content)
         if data and not error:
             state.set("career_advice", data.get("career_advice", ""))

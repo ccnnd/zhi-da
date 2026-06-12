@@ -20,21 +20,23 @@ class LLMChunk:
 
 class LLMClient(ABC):
     @abstractmethod
-    async def complete(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
+    async def complete(self, messages: list[dict], tools: list[dict] = None, max_tokens: int = None) -> LLMResponse:
         ...
 
     @abstractmethod
-    async def stream(self, messages: list[dict], tools: list[dict] = None) -> AsyncIterator[LLMChunk]:
+    async def stream(self, messages: list[dict], tools: list[dict] = None, max_tokens: int = None) -> AsyncIterator[LLMChunk]:
         ...
 
 
 class OpenAIClient(LLMClient):
     def __init__(self):
         from openai import AsyncOpenAI
-        self._client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
+        self._client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=180.0)
 
-    async def complete(self, messages: list[dict], tools: list[dict] = None) -> LLMResponse:
-        kwargs = {"model": LLM_MODEL, "messages": messages, "temperature": 0.3}
+    async def complete(self, messages: list[dict], tools: list[dict] = None, max_tokens: int = None) -> LLMResponse:
+        kwargs = {"model": LLM_MODEL, "messages": messages, "temperature": 0.3, "timeout": 180.0}
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
         if tools:
             kwargs["tools"] = tools
         response = await self._client.chat.completions.create(**kwargs)
@@ -46,8 +48,10 @@ class OpenAIClient(LLMClient):
                    "completion_tokens": response.usage.completion_tokens if response.usage else 0},
         )
 
-    async def stream(self, messages: list[dict], tools: list[dict] = None) -> AsyncIterator[LLMChunk]:
+    async def stream(self, messages: list[dict], tools: list[dict] = None, max_tokens: int = None) -> AsyncIterator[LLMChunk]:
         kwargs = {"model": LLM_MODEL, "messages": messages, "temperature": 0.3, "stream": True}
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
         if tools:
             kwargs["tools"] = tools
         stream = await self._client.chat.completions.create(**kwargs)

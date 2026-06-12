@@ -730,6 +730,15 @@ export default function Dashboard() {
           <span style={{ fontSize: 13, color: 'var(--text-secondary)', marginLeft: 'var(--space-2)' }}>
             学生：<span style={{ color: 'var(--text-primary)', fontWeight: 600, fontFamily: 'var(--font-display)' }}>{student.name}</span>
           </span>
+          <span style={{
+            fontSize: 11, color: 'var(--text-tertiary, #94a3b8)',
+            marginLeft: 6,
+            background: 'var(--bg-tertiary, #f1f5f9)',
+            padding: '1px 6px', borderRadius: 4,
+            fontFamily: 'var(--font-mono, monospace)',
+          }}>
+            ID: {student.id}
+          </span>
           <span style={{ fontSize: 13, color: 'var(--text-secondary)', marginLeft: 'var(--space-3)' }}>
             目标：<span className="tag tag-blue">{student.target_job || '未设置'}</span>
           </span>

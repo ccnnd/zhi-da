@@ -55,8 +55,17 @@ async def _ensure_ability_model(session: AsyncSession, job_post_id: str, **kwarg
         session.add(JobAbilityModel(job_post_id=job_post_id, **kwargs))
 
 
+async def _ensure_job_direction(session: AsyncSession, jid: str, **kwargs):
+    """幂等插入系统岗位方向（jobs 表）：不存在则插入，已存在则跳过。"""
+    from db.models import Job
+    j = await session.get(Job, jid)
+    if j is None:
+        j = Job(id=jid, **kwargs)
+        session.add(j)
+
+
 async def init_db():
-    from db.models import Base, Enterprise, JobPost, JobAbilityModel, StudentAttachment, AgentTrace
+    from db.models import Base, Enterprise, Job, JobPost, JobAbilityModel, StudentAttachment, AgentTrace
     async with engine.begin() as conn:
         await _migrate_student_id_type(conn)
         await conn.run_sync(Base.metadata.create_all)
@@ -90,7 +99,39 @@ async def init_db():
             description='小米集团成立于2010年，是以手机、智能硬件和IoT平台为核心的消费电子及智能制造公司。坚持"感动人心、价格厚道"的理念，构建全球最大的消费级IoT平台。',
             contact_name='周文婷', contact_email='zhouwenting@xiaomi.com', status='active')
 
-        # --- 岗位 ---
+        # --- 系统岗位方向（jobs 表） ---
+        _default_job_directions = [
+            ('dir_01', 'Java后端开发', '后端开发', 'Java/Spring/MySQL/微服务'),
+            ('dir_02', 'Python后端开发', '后端开发', 'Python/Django/FastAPI/Redis'),
+            ('dir_03', '前端开发', '前端开发', 'React/Vue/TypeScript/CSS'),
+            ('dir_04', '移动端开发', '移动端开发', 'Android/iOS/Flutter/React Native'),
+            ('dir_05', 'AI/机器学习', '人工智能', 'Python/PyTorch/TensorFlow/NLP/CV'),
+            ('dir_06', '数据科学', '数据科学', 'Python/SQL/Spark/数据挖掘/统计分析'),
+            ('dir_07', '数据分析', '数据分析', 'SQL/Excel/Python/BI工具/业务分析'),
+            ('dir_08', 'DevOps/SRE', '运维', 'Docker/Kubernetes/Linux/CICD/监控'),
+            ('dir_09', '测试开发', '测试', '自动化测试/性能测试/测试框架/Java/Python'),
+            ('dir_10', '产品经理', '产品', '需求分析/PRD/用户体验/数据分析/项目管理'),
+            ('dir_11', 'UI/UX设计', '设计', 'Figma/Sketch/用户研究/交互设计'),
+            ('dir_12', '网络安全', '安全', '渗透测试/安全架构/WAF/密码学'),
+            ('dir_13', '嵌入式开发', '嵌入式', 'C/C++/RTOS/单片机/驱动开发/ARM'),
+            ('dir_14', '游戏开发', '游戏开发', 'Unity/Unreal/C++/C#/图形学'),
+            ('dir_15', '区块链开发', '区块链', 'Solidity/智能合约/Web3/共识算法'),
+            ('dir_16', '云计算架构', '云计算', 'AWS/Azure/GCP/架构设计/迁移'),
+            ('dir_17', '通信研发', '通信', '5G/LTE/协议栈/信号处理/C++'),
+            ('dir_18', 'NLP算法工程师', '人工智能', 'Transformer/大模型/文本生成/语义理解'),
+            ('dir_19', '计算机视觉工程师', '人工智能', 'CNN/GAN/目标检测/图像分割/视频分析'),
+            ('dir_20', '推荐算法工程师', '算法', '推荐系统/CTR预估/用户画像/排序模型'),
+            ('dir_21', '量化交易', '金融科技', 'Python/金融模型/回测/高频交易'),
+            ('dir_22', '自动驾驶', '自动驾驶', '感知/规划控制/SLAM/C++/ROS'),
+            ('dir_23', '音视频开发', '音视频', 'FFmpeg/WebRTC/编解码/流媒体'),
+            ('dir_24', '数据库开发', '基础架构', 'MySQL/PostgreSQL/分布式存储/NewSQL'),
+            ('dir_25', '全栈开发', '全栈开发', 'React/Node.js/PostgreSQL/Docker/全栈'),
+        ]
+        for jid, title, category, desc in _default_job_directions:
+            await _ensure_job_direction(session, jid, title=title, category=category,
+                description=f'{title}方向，涉及{desc}等技术栈', company='')
+
+        # --- 企业岗位（job_posts 表） ---
         await _ensure_job_post(session, 'post_1', enterprise_id='1', title='Python后端开发工程师',
             category='后端开发',
             description='负责字节跳动核心业务平台的后端架构设计与开发工作，参与分布式微服务系统的设计与优化，保障亿级用户场景下的高可用与高性能。',

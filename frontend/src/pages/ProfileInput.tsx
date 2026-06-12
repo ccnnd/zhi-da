@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Sparkles } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import { createStudent, updateStudent, listJobs, getHealthStatus, getStudentJobs, login, setAuthToken, parseResume, uploadResumeFile } from '../services/api'
+import { createStudent, updateStudent, listJobs, getHealthStatus, getStudentJobs, login, setAuthToken, parseResume, uploadResumeFile, getAuthToken } from '../services/api'
 import ThemeToggle from '../components/shared/ThemeToggle'
 import { toast } from '../utils/toast'
 
@@ -140,7 +140,9 @@ export default function ProfileInput() {
   }, [])
   useEffect(() => {
     listJobs().then(setSystemJobs).catch(() => {})
-    getStudentJobs().then(setEntJobs).catch(() => {})
+    if (getAuthToken()) {
+      getStudentJobs().then(setEntJobs).catch(() => {})
+    }
   }, [])
 
   // 自动保存草稿到 localStorage（防抖 800ms）
@@ -247,28 +249,34 @@ export default function ProfileInput() {
   }
 
   // AI 解析后将结果映射到表单
+  // 重要：先重置所有可解析字段为默认值，防止上一份简历的旧数据残留。
+  // 解析不出的字段保持空白，不再 fallback 到旧值。
   function applyParsedResult(result: any) {
+    const fresh = defaultForm()
     setForm(prev => ({
-      ...prev,
-      name: result.name || prev.name,
-      grade: result.grade || prev.grade,
-      major: result.major || prev.major,
-      target_job: result.target_job || prev.target_job,
-      tech_skills: result.tech_skills || prev.tech_skills,
-      soft_skills: result.soft_skills || prev.soft_skills,
-      domain_knowledge: result.domain_knowledge || prev.domain_knowledge,
-      academic_foundation: result.academic_foundation || prev.academic_foundation,
-      soft_skill_evidence: result.soft_skill_evidence || prev.soft_skill_evidence,
+      ...fresh,
       resume_text: resumeText || prev.resume_text,
+      name: result.name || '',
+      grade: result.grade || '',
+      major: result.major || '',
+      target_job: result.target_job || '',
+      tech_skills: result.tech_skills || {},
+      soft_skills: result.soft_skills || {},
+      domain_knowledge: result.domain_knowledge || {},
+      academic_foundation: result.academic_foundation || {},
+      soft_skill_evidence: result.soft_skill_evidence || {},
       summary: result.summary || '',
-      // 映射新 profile_sections 字段
       ...(result.profile_sections ? mapProfileSections(result.profile_sections) : {}),
-      // 从旧格式映射技能
-      ...(result.tech_skills && !result.profile_sections?.skills?.length
+      ...(result.profile_sections?.basic_info ? {
+        school: result.profile_sections.basic_info.school || '',
+        education_level: result.profile_sections.basic_info.education_level || '',
+        phone: result.profile_sections.basic_info.phone || '',
+        email: result.profile_sections.basic_info.email || '',
+      } : {}),
+      ...(result.tech_skills && Object.keys(result.tech_skills).length > 0 && !result.profile_sections?.skills?.length
         ? { skills: Object.entries(result.tech_skills).map(([name, score]) => ({ name, level: scoreToLevel(score as number), description: '' })) }
         : {}),
-      // 从旧格式映射项目
-      ...(result.project_exp && !result.profile_sections?.project_exp?.length
+      ...(result.project_exp && result.project_exp.length > 0 && !result.profile_sections?.project_exp?.length
         ? { project_exp: result.project_exp.map((p: any) => ({ project_name: p.name || '', project_role: p.role || '', description: p.description || '', start_date: '', end_date: '' })) }
         : {}),
     }))

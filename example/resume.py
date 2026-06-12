@@ -59,27 +59,21 @@ RESUME_OUTPUT_SCHEMA = """{
   }
 }"""
 
-SYSTEM_PROMPT = f"""你是一个精确的简历解析器。你的任务是从下面提供的简历文本中提取结构化信息。
-
-**核心原则：你只能使用本次提供的简历文本。请忘记之前看过的任何简历内容，不要使用任何外部知识或记忆。如果本次简历文本中某信息不存在，必须返回空值。**
-
-请严格按以下JSON Schema解析简历，只返回纯JSON，不要任何解释或代码块标记。
+SYSTEM_PROMPT = f"""请严格按以下JSON Schema解析简历，只返回纯JSON，不要任何解释或代码块标记。
 
 {RESUME_OUTPUT_SCHEMA}
 
 ## 核心规则
-1. **禁止编造（最重要）：** 简历中**没有明确写出**的信息（GPA、排名、电话、邮箱等），必须返回空字符串""，**绝对禁止猜测、编造或使用之前见过的简历中的信息**
-2. **仅本次文本：** 只从下面提供的简历文本中提取信息。即使你之前解析过其他简历，也必须完全忽略，只关注本次提供的文本
-3. 软技能 level：有明确协作/答辩/主导证据才能给 strong，无证据给 weak
-4. tech_skills 评分标准：精通(90-100)/熟练(75-85)/掌握(60-70)/了解(40-55)，须有区分度
-5. domain_knowledge 从技术栈推断：Spring→后端开发、React→前端开发、PyTorch→深度学习
-6. 所有字段必须存在，无数据时返回空字符串""或空数组[]或空对象{{}}
-7. profile_sections 中各子对象必须存在，skills 至少提取1项，包含简历中所有技能
-8. project_exp 顶层和 profile_sections.project_exp 内容一致
-9. **学校名称（school）：** 仔细搜索简历开头、页眉、教育经历栏中的"XX大学""XX学院""XX University"，即使文字被PDF提取打乱也要尽力识别
-10. **学历（education_level）：** 从年级（大一~大四→本科，研一~研三→硕士）、学位标注（Bachelor/Master/PhD/学士/硕士/博士）、或毕业年份推断，无法确定时留空
-11. **专业（major）：** 搜索"XX专业""XX工程""XX科学""Major in""Department of"等关键词
-12. **自检：** 提取完成后，请确认每个非空字段的信息确实出现在本次简历文本中。如果某个信息你无法在文本中找到原文依据，请将其设为空"""
+1. 简历中**没有明确写出**的信息（GPA、排名、电话、邮箱等），必须返回空字符串""，**绝对禁止猜测或编造**
+2. 软技能 level：有明确协作/答辩/主导证据才能给 strong，无证据给 weak
+3. tech_skills 评分标准：精通(90-100)/熟练(75-85)/掌握(60-70)/了解(40-55)，须有区分度
+4. domain_knowledge 从技术栈推断：Spring→后端开发、React→前端开发、PyTorch→深度学习
+5. 所有字段必须存在，无数据时返回空字符串""或空数组[]或空对象{{}}
+6. profile_sections 中各子对象必须存在，skills 至少提取1项，包含简历中所有技能
+7. project_exp 顶层和 profile_sections.project_exp 内容一致
+8. **学校名称（school）：** 仔细搜索简历开头、页眉、教育经历栏中的"XX大学""XX学院""XX University"，即使文字被PDF提取打乱也要尽力识别
+9. **学历（education_level）：** 从年级（大一~大四→本科，研一~研三→硕士）、学位标注（Bachelor/Master/PhD/学士/硕士/博士）、或毕业年份推断，无法确定时留空
+10. **专业（major）：** 搜索"XX专业""XX工程""XX科学""Major in""Department of"等关键词"""
 
 
 class ResumeParseRequest(BaseModel):
@@ -430,9 +424,6 @@ async def parse_resume_with_llm(text: str) -> ResumeParseResponse:
                 cleaned["name"], len(cleaned["tech_skills"]),
                 len(cleaned["project_exp"]), cleaned["target_job"])
 
-    # 后置验证：关键字段必须在原文中出现，否则清空（防止 LLM 编造/混淆简历）
-    cleaned = _verify_against_source(cleaned, text)
-
     return ResumeParseResponse(
         name=cleaned["name"],
         grade=cleaned["grade"],
@@ -447,44 +438,6 @@ async def parse_resume_with_llm(text: str) -> ResumeParseResponse:
         soft_skill_evidence=cleaned["soft_skill_evidence"],
         profile_sections=cleaned.get("profile_sections", {}),
     )
-
-
-def _verify_against_source(cleaned: dict, source_text: str) -> dict:
-    """后置验证：关键字段必须在原文中出现，否则清空，防止 LLM 编造或混淆简历。"""
-    if not source_text:
-        return cleaned
-
-    def appears_in_source(value: str, min_len: int = 2) -> bool:
-        """检查值是否在原文中出现（允许部分匹配，如原文'张三'，提取'张三'）"""
-        if not value or len(value) < min_len:
-            return True  # 空值或太短的不需要验证
-        # 直接匹配
-        if value in source_text:
-            return True
-        # 逐字匹配（中文姓名可能被空格/换行分隔）
-        if len(value) >= 2:
-            chars_in_source = all(ch in source_text for ch in value if ch.strip())
-            if chars_in_source:
-                return True
-        return False
-
-    # 验证姓名
-    name = cleaned.get("name", "")
-    if name and not appears_in_source(name, min_len=2):
-        logger.warning("后置验证：姓名 '%s' 未在原文中出现，已清空", name)
-        cleaned["name"] = ""
-        if cleaned.get("profile_sections", {}).get("basic_info", {}).get("name"):
-            cleaned["profile_sections"]["basic_info"]["name"] = ""
-
-    # 验证学校
-    school = cleaned.get("profile_sections", {}).get("education", {}).get("school") or ""
-    if school and not appears_in_source(school, min_len=3):
-        logger.warning("后置验证：学校 '%s' 未在原文中出现，已清空", school)
-        cleaned["profile_sections"]["education"]["school"] = ""
-        if cleaned.get("profile_sections", {}).get("basic_info", {}).get("school"):
-            cleaned["profile_sections"]["basic_info"]["school"] = ""
-
-    return cleaned
 
 
 def _extract_pdf_text(content: bytes) -> str:

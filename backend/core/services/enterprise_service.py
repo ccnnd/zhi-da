@@ -1,6 +1,6 @@
 # 企业端服务——企业信息管理、在招岗位发布、JD AI 模型解析、已授权候选人检索
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from core.utils.time import utc_now
 from db.models import Enterprise, JobPost, JobAbilityModel, StudentAuthorization, Student, DiagnosisResult, StudentAttachment
 from config.settings import LLM_API_KEY
@@ -166,7 +166,7 @@ async def parse_job_ability_model(db: AsyncSession, job_id: str):
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"职位名称: {job.title}\n分类: {job.category}\n岗位描述及要求: {job.requirements_text}"}
         ]
-        response = await llm.complete(messages)
+        response = await llm.complete(messages, max_tokens=1500)
         try:
             data = _extract_json(response.content)
             
@@ -253,14 +253,27 @@ async def submit_job_review(db: AsyncSession, ent_id: str, job_id: str):
     return job
 
 
-# 8. 获取企业岗位的已授权候选人
+# 8. 获取企业岗位的已授权候选人（含 Gap 3：各岗位潜在匹配匿名计数 + Gap 7：自动同步最新诊断版本）
 async def list_authorized_candidates(db: AsyncSession, ent_id: str):
+    # Gap 7: 使用每学生最新诊断版本，而非授权时的固定版本
+    # 子查询：每学生最新诊断版本
+    latest_ver_subq = (
+        select(
+            DiagnosisResult.student_id,
+            func.max(DiagnosisResult.version).label('max_version')
+        )
+        .group_by(DiagnosisResult.student_id)
+        .subquery()
+    )
+
     # 查询所有授权状态为 active 且属于该企业的候选人记录
+    # JOIN 改为先连接 latest_ver_subq（由 student_id 关联），再通过 (student_id, version) 获取最新诊断
     stmt = (
         select(
             StudentAuthorization.id.label("auth_id"),
             StudentAuthorization.created_at.label("auth_date"),
             StudentAuthorization.status.label("auth_status"),
+            StudentAuthorization.diagnosis_id.label("auth_diagnosis_id"),
             Student.id.label("student_id"),
             Student.name.label("student_name"),
             Student.grade.label("student_grade"),
@@ -269,17 +282,24 @@ async def list_authorized_candidates(db: AsyncSession, ent_id: str):
             JobPost.id.label("job_post_id"),
             DiagnosisResult.id.label("diagnosis_id"),
             DiagnosisResult.match_score.label("match_score"),
-            DiagnosisResult.dimension_scores.label("dimension_scores")
+            DiagnosisResult.dimension_scores.label("dimension_scores"),
+            DiagnosisResult.version.label("diagnosis_version"),
         )
         .join(Student, StudentAuthorization.student_id == Student.id)
         .join(JobPost, StudentAuthorization.job_post_id == JobPost.id)
-        .join(DiagnosisResult, StudentAuthorization.diagnosis_id == DiagnosisResult.id)
+        .join(latest_ver_subq, StudentAuthorization.student_id == latest_ver_subq.c.student_id)
+        .join(DiagnosisResult,
+              (DiagnosisResult.student_id == latest_ver_subq.c.student_id)
+              & (DiagnosisResult.version == latest_ver_subq.c.max_version))
         .where(StudentAuthorization.enterprise_id == ent_id, StudentAuthorization.status == "active")
         .order_by(desc(DiagnosisResult.match_score))
     )
     result = await db.execute(stmt)
     candidates = []
+    authorized_per_job: dict[str, int] = {}
     for row in result.all():
+        # Gap 7: 标注授权版本是否为最新
+        is_latest = (row.diagnosis_id == row.auth_diagnosis_id)
         candidates.append({
             "auth_id": row.auth_id,
             "auth_date": row.auth_date.isoformat() if row.auth_date else None,
@@ -290,25 +310,90 @@ async def list_authorized_candidates(db: AsyncSession, ent_id: str):
             "job_title": row.job_title,
             "job_post_id": row.job_post_id,
             "diagnosis_id": row.diagnosis_id,
+            "auth_diagnosis_id": row.auth_diagnosis_id,
+            "is_latest_version": is_latest,
             "match_score": row.match_score,
             "dimension_scores": row.dimension_scores,
+            "diagnosis_version": row.diagnosis_version,
         })
-    return candidates
+        authorized_per_job[row.job_post_id] = authorized_per_job.get(row.job_post_id, 0) + 1
+
+    # --- Gap 3: 计算各岗位的潜在匹配（已诊断但未授权）匿名计数 ---
+    # 1. 获取该企业所有 approved 岗位
+    jobs_stmt = select(JobPost.id, JobPost.title).where(
+        JobPost.enterprise_id == ent_id,
+        JobPost.status == "approved"
+    )
+    jobs_res = await db.execute(jobs_stmt)
+    jobs = [(row.id, row.title) for row in jobs_res.all()]
+
+    # 2. 取所有学生的"最新诊断"记录（每学生取最大 version），提取 top5_jobs
+    diag_stmt = select(
+        DiagnosisResult.student_id,
+        DiagnosisResult.version,
+        DiagnosisResult.top5_jobs
+    ).order_by(DiagnosisResult.student_id, desc(DiagnosisResult.version))
+    diag_res = await db.execute(diag_stmt)
+    latest_diags: dict[int, list] = {}  # student_id -> top5_jobs
+    for dr in diag_res.all():
+        if dr.student_id not in latest_diags:
+            latest_diags[dr.student_id] = dr.top5_jobs or []
+
+    # 3. 按岗位统计：top5_jobs 中包含该岗位的学生数 = diagnosed_count
+    diagnosed_per_job: dict[str, int] = {}
+    for job_id, _ in jobs:
+        count = 0
+        for _, top5 in latest_diags.items():
+            if any(str(j.get("job_id", "")) == job_id for j in top5):
+                count += 1
+        diagnosed_per_job[job_id] = count
+
+    # 4. 组装 job_match_stats
+    job_match_stats = []
+    for job_id, job_title in jobs:
+        authorized = authorized_per_job.get(job_id, 0)
+        diagnosed = diagnosed_per_job.get(job_id, 0)
+        job_match_stats.append({
+            "job_post_id": job_id,
+            "job_title": job_title,
+            "authorized_count": authorized,
+            "potential_match_count": max(0, diagnosed - authorized),
+        })
+
+    return {
+        "candidates": candidates,
+        "job_match_stats": job_match_stats,
+    }
 
 
-# 9. 获取单个候选人授权详情
+# 9. 获取单个候选人授权详情（Gap 7：自动同步最新诊断版本）
 async def get_candidate_detail(db: AsyncSession, ent_id: str, student_id: int, auth_id: str):
     # 验证该授权是否有效且属于该企业
     auth = await db.get(StudentAuthorization, auth_id)
     if not auth or auth.enterprise_id != ent_id or auth.student_id != student_id or auth.status != "active":
         return None
-        
+
     student = await db.get(Student, student_id)
-    diag = await db.get(DiagnosisResult, auth.diagnosis_id)
     job_post = await db.get(JobPost, auth.job_post_id)
-    
-    if not student or not diag or not job_post:
+
+    if not student or not job_post:
         return None
+
+    # Gap 7: 获取该学生最新诊断记录（而非授权时的固定版本）
+    diag_stmt = (
+        select(DiagnosisResult)
+        .where(DiagnosisResult.student_id == student_id)
+        .order_by(desc(DiagnosisResult.version))
+        .limit(1)
+    )
+    diag_res = await db.execute(diag_stmt)
+    diag = diag_res.scalar_one_or_none()
+
+    if not diag:
+        return None
+
+    # 检查授权版本是否为最新
+    is_latest_version = (diag.id == auth.diagnosis_id)
 
     attachment_result = await db.execute(
         select(StudentAttachment)
@@ -327,7 +412,7 @@ async def get_candidate_detail(db: AsyncSession, ent_id: str, student_id: int, a
         }
         for att in attachment_result.scalars().all()
     ]
-        
+
     return {
         "student": {
             "id": student.id,
@@ -360,5 +445,8 @@ async def get_candidate_detail(db: AsyncSession, ent_id: str, student_id: int, a
             "ai_reasoning": diag.ai_reasoning or {}
         },
         "authorization_time": auth.created_at.isoformat() if auth.created_at else None,
+        # Gap 7: 标注授权时的诊断版本与最新版本的关系
+        "auth_diagnosis_version": auth.diagnosis_id,
+        "is_latest_version": is_latest_version,
         "attachments": attachments,
     }

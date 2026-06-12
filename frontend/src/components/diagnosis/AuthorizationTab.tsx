@@ -4,7 +4,8 @@ import {
   getStudentJobs,
   getStudentAuthorizations,
   createStudentAuthorization,
-  deleteStudentAuthorization
+  deleteStudentAuthorization,
+  batchCreateStudentAuthorization
 } from '../../services/api'
 
 interface AuthorizationTabProps {
@@ -18,6 +19,7 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
   const [loading, setLoading] = useState(false)
   const [actionId, setActionId] = useState<string | null>(null)
   const [showOtherJobs, setShowOtherJobs] = useState(false)
+  const [batchAuthorizing, setBatchAuthorizing] = useState(false)
 
   const loadData = async () => {
     setLoading(true)
@@ -81,8 +83,8 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
     const confirmed = window.confirm(
       `确认将 V${diagnosisResult.version} 版本诊断画像授权给「${job.enterprise_name}」的「${job.title}」岗位？\n\n` +
       `授权内容包括：五维能力评分、技能标签、匹配度分析、成长建议。\n` +
-      `企业将在该岗位下看到你的 V${diagnosisResult.version} 版本画像数据。\n` +
-      `注意：后续再诊断不会自动更新此授权，需手动重新授权。`
+      `企业将在该岗位下看到你的最新诊断画像数据。\n` +
+      `后续复评后，企业端将自动同步查看最新版本画像。`
     )
     if (!confirmed) return
     setActionId(job.id)
@@ -109,6 +111,61 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
       toast.error(`撤销授权失败: ${err.message || err}`)
     } finally {
       setActionId(null)
+    }
+  }
+
+  // 一键批量授权：授权当前诊断目标岗位 + 所有推荐岗位（Gap 6）
+  const handleBatchAuthorize = async () => {
+    if (!student?.id || !diagnosisResult?.id) return
+
+    // 收集待授权的岗位：目标岗位 + 推荐岗位（去重）
+    const jobsToAuth: any[] = []
+    const seenIds = new Set<string>()
+    if (targetJob && !seenIds.has(targetJob.id)) {
+      jobsToAuth.push(targetJob)
+      seenIds.add(targetJob.id)
+    }
+    for (const job of recommendedJobs) {
+      if (!seenIds.has(job.id)) {
+        jobsToAuth.push(job)
+        seenIds.add(job.id)
+      }
+    }
+    // 过滤已授权的岗位
+    const activeJobTitles = new Set(auths.filter(a => a.status === 'active').map(a => a.job_title))
+    const pendingJobs = jobsToAuth.filter(j => !activeJobTitles.has(j.title))
+
+    if (pendingJobs.length === 0) {
+      toast.error('所有推荐岗位均已授权，无需重复操作')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `确认将 V${diagnosisResult.version} 版本诊断画像一键授权给以下 ${pendingJobs.length} 个岗位？\n\n` +
+      pendingJobs.map((j, i) => `  ${i + 1}. ${j.enterprise_name} — ${j.title}`).join('\n') +
+      `\n\n授权内容包括：五维能力评分、技能标签、匹配度分析、成长建议。\n` +
+      `后续复评后，企业端将自动同步查看最新版本画像。`
+    )
+    if (!confirmed) return
+
+    setBatchAuthorizing(true)
+    try {
+      const result = await batchCreateStudentAuthorization({
+        student_id: student.id,
+        job_post_ids: pendingJobs.map(j => j.id),
+        diagnosis_id: diagnosisResult.id
+      })
+      const successCount = result.created + result.updated
+      if (result.failed > 0) {
+        toast.error(`批量授权完成：${successCount} 个成功，${result.failed} 个失败`)
+      } else {
+        toast.success(`✓ 一键授权成功！已将画像授权给 ${successCount} 个岗位`)
+      }
+      await loadData()
+    } catch (err: any) {
+      toast.error(`批量授权失败: ${err.message || err}`)
+    } finally {
+      setBatchAuthorizing(false)
     }
   }
 
@@ -251,6 +308,38 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
           gap: 16
         }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>可投递/授权的企业招聘岗位</h3>
+
+          {/* Gap 6: 一键批量授权按钮 */}
+          {diagnosisResult && jobs.length > 0 && (() => {
+            const activeTitles = new Set(auths.filter(a => a.status === 'active').map(a => a.job_title))
+            const batchCandidates = [targetJob, ...recommendedJobs].filter(Boolean).filter(j => !activeTitles.has(j.title))
+            if (batchCandidates.length <= 1) return null
+            return (
+              <button
+                onClick={handleBatchAuthorize}
+                disabled={batchAuthorizing}
+                className="btn btn-primary"
+                style={{
+                  width: '100%',
+                  padding: '10px 16px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  background: 'linear-gradient(135deg, var(--accent-primary), #5a6fff)',
+                  border: 'none',
+                  borderRadius: 10,
+                  color: '#fff',
+                  cursor: batchAuthorizing ? 'wait' : 'pointer',
+                  opacity: batchAuthorizing ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                {batchAuthorizing ? '⏳' : '⚡'} {batchAuthorizing ? '批量授权中...' : `一键授权全部推荐岗位（${batchCandidates.length}个）`}
+              </button>
+            )
+          })()}
 
           {loading ? (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>获取岗位中...</div>

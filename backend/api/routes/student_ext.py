@@ -17,6 +17,12 @@ class AuthorizationCreate(BaseModel):
     diagnosis_id: str
 
 
+class BatchAuthorizationCreate(BaseModel):
+    student_id: int
+    job_post_ids: list[str]
+    diagnosis_id: str
+
+
 # 1. 获取可投递/授权的企业审核通过的岗位列表
 # 学生端可见岗位条件：enterprise.status == 'active' AND job.status == 'approved'
 @router.get("/jobs")
@@ -199,3 +205,98 @@ async def revoke_authorization(
     await db.commit()
     
     return {"status": "success", "message": "Authorization revoked successfully"}
+
+
+# 5. 批量授权：一次授权多个岗位（Gap 6）
+@router.post("/authorizations/batch")
+async def batch_create_authorizations(
+    req: BatchAuthorizationCreate,
+    db: AsyncSession = Depends(get_db),
+    identity: Identity = Depends(require_student),
+):
+    verify_student_access(req.student_id, identity)
+
+    # 校验学生存在
+    student = await db.get(Student, req.student_id)
+    if not student:
+        raise HTTPException(404, "Student not found")
+
+    # 校验诊断记录存在且归属该学生
+    diag = await db.get(DiagnosisResult, req.diagnosis_id)
+    if not diag:
+        raise HTTPException(404, "Diagnosis result not found")
+    if diag.student_id != req.student_id:
+        raise HTTPException(400, "Diagnosis result does not belong to this student")
+
+    created = 0
+    updated = 0
+    failed = 0
+    details: list[dict] = []
+
+    for job_post_id in req.job_post_ids:
+        try:
+            # 校验岗位
+            job_post = await db.get(JobPost, job_post_id)
+            if not job_post:
+                failed += 1
+                details.append({"job_post_id": job_post_id, "status": "failed", "reason": "Job post not found"})
+                continue
+
+            if job_post.status != "approved":
+                failed += 1
+                details.append({"job_post_id": job_post_id, "status": "failed", "reason": "Job post is not approved"})
+                continue
+
+            # 校验企业
+            enterprise = await db.get(Enterprise, job_post.enterprise_id)
+            if not enterprise:
+                failed += 1
+                details.append({"job_post_id": job_post_id, "status": "failed", "reason": "Enterprise not found"})
+                continue
+            if enterprise.status != "active":
+                failed += 1
+                details.append({"job_post_id": job_post_id, "status": "failed", "reason": f"Enterprise '{enterprise.name}' is not active"})
+                continue
+
+            # 检查是否已有授权记录
+            stmt = select(StudentAuthorization).where(
+                StudentAuthorization.student_id == req.student_id,
+                StudentAuthorization.job_post_id == job_post_id
+            )
+            res = await db.execute(stmt)
+            existing = res.scalar_one_or_none()
+
+            if existing:
+                existing.status = "active"
+                existing.diagnosis_id = req.diagnosis_id
+                existing.created_at = utc_now()
+                existing.revoked_at = None
+                auth = existing
+                updated += 1
+                details.append({"job_post_id": job_post_id, "status": "updated", "auth_id": auth.id})
+            else:
+                auth = StudentAuthorization(
+                    student_id=req.student_id,
+                    enterprise_id=job_post.enterprise_id,
+                    job_post_id=job_post_id,
+                    diagnosis_id=req.diagnosis_id,
+                    status="active"
+                )
+                db.add(auth)
+                await db.flush()
+                created += 1
+                details.append({"job_post_id": job_post_id, "status": "created", "auth_id": auth.id})
+
+        except Exception as e:
+            failed += 1
+            details.append({"job_post_id": job_post_id, "status": "failed", "reason": str(e)})
+
+    await db.commit()
+
+    return {
+        "created": created,
+        "updated": updated,
+        "failed": failed,
+        "total": len(req.job_post_ids),
+        "details": details,
+    }

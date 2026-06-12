@@ -179,6 +179,11 @@ export async function deleteStudentAuthorization(authId: string) {
   return res.data
 }
 
+export async function batchCreateStudentAuthorization(data: { student_id: number; job_post_ids: string[]; diagnosis_id: string }) {
+  const res = await api.post('/student/authorizations/batch', data)
+  return res.data
+}
+
 // ==========================================
 // 2. 企业端 API (Enterprise APIs)
 // ==========================================
@@ -246,8 +251,10 @@ export async function getAdminSummary() {
   return res.data
 }
 
-export async function listAdminStudents(page = 1, pageSize = 20) {
-  const res = await api.get('/admin/students', { params: { page, page_size: pageSize } })
+export async function listAdminStudents(page = 1, pageSize = 20, diagnosisStatus?: string) {
+  const params: Record<string, any> = { page, page_size: pageSize }
+  if (diagnosisStatus) params.diagnosis_status = diagnosisStatus
+  const res = await api.get('/admin/students', { params })
   return res.data
 }
 
@@ -307,6 +314,11 @@ export async function approveAdminJob(jobId: string) {
 
 export async function rejectAdminJob(jobId: string, reason: string) {
   const res = await api.post(`/admin/jobs/${jobId}/reject`, { reason })
+  return res.data
+}
+
+export async function recommendStudentToEnterprise(studentId: string | number, jobPostId: string) {
+  const res = await api.post(`/admin/students/${studentId}/recommend`, { job_post_id: jobPostId })
   return res.data
 }
 

@@ -286,7 +286,7 @@ async def llm_review_evidence(task_name: str, task_criteria: str, evidence: str)
     ]
 
     try:
-        response = await llm.complete(messages)
+        response = await llm.complete(messages, max_tokens=500)
         from core.harness.validator import SchemaValidator
         data, error = SchemaValidator.validate_json_output(response.content)
         if data and not error:

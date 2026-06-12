@@ -968,7 +968,7 @@ class StudentAgentRuntime:
                     {"role": "system", "content": "你是工具选择助手。根据用户问题判断是否需要额外工具。只输出工具名称列表，用逗号分隔。如果不需要额外工具，输出 NONE。"},
                     {"role": "user", "content": f"用户问题：{message}\n\n已调用的工具：{already_called}\n\n可用工具：\n{tool_descriptions}\n\n是否需要额外工具？"},
                 ]
-                suggest_response = await llm_suggest.complete(suggest_messages)
+                suggest_response = await llm_suggest.complete(suggest_messages, max_tokens=200)
                 suggest_text = suggest_response.content.strip()
 
                 if suggest_text != "NONE" and suggest_text:
@@ -1117,7 +1117,7 @@ class StudentAgentRuntime:
             # 流式进度：准备生成回答
             if on_progress:
                 await on_progress("composing", 0.9, "正在组织回答...")
-            response = await llm.complete(messages)
+            response = await llm.complete(messages, max_tokens=1000)
             # 统一记忆写入（ask 意图写入完整对话）
             await agent_memory_service.maybe_write_memory(
                 db, student_id, "ask",

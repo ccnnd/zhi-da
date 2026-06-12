@@ -98,6 +98,7 @@ export default function EnterpriseDashboard() {
   const [showCandModal, setShowCandModal] = useState(false)
   const [candidatesJobId, setCandidatesJobId] = useState<string>('')
   const [candidatesJobTitle, setCandidatesJobTitle] = useState<string>('')
+  const [jobMatchStats, setJobMatchStats] = useState<any[]>([])  // Gap 3: per-job potential match counts
 
   // Load profile
   const loadProfile = async () => {
@@ -141,13 +142,17 @@ export default function EnterpriseDashboard() {
     }
   }
 
-  // Load candidate list
+  // Load candidate list (Gap 3: now returns { candidates, job_match_stats })
   const loadCandidates = async (jobId?: string) => {
     setCandidatesLoading(true)
     try {
       const data = await getEnterpriseCandidates(enterpriseId)
+      // Handle new format: { candidates, job_match_stats } or legacy flat array
+      const candidateList = Array.isArray(data) ? data : (data.candidates || [])
+      const stats = Array.isArray(data) ? [] : (data.job_match_stats || [])
+      setJobMatchStats(stats)
       // 如果指定了 jobId，过滤为该岗位的候选人
-      setCandidates(jobId ? data.filter((c: any) => c.job_post_id === jobId) : data)
+      setCandidates(jobId ? candidateList.filter((c: any) => c.job_post_id === jobId) : candidateList)
     } catch (err) {
       console.error('Failed to load candidates', err)
     } finally {
@@ -167,6 +172,8 @@ export default function EnterpriseDashboard() {
   useEffect(() => {
     if (activeTab === 'jobs') {
       loadJobs()
+      // Gap 3: also load match stats to show potential-match badges on jobs
+      loadCandidates()
     } else if (activeTab === 'candidates_for_job') {
       loadCandidates(candidatesJobId)
     }
@@ -451,6 +458,20 @@ export default function EnterpriseDashboard() {
     const gaps = selectedCandidate.diagnosis.gap_details || []
     if (gaps.length === 0) return {}
 
+    // 维度中英文映射
+    const dimLabelMap: Record<string, string> = {
+      tech_skills: '技术技能',
+      project_exp: '项目经验',
+      academic_foundation: '学业基础',
+      domain_knowledge: '领域认知',
+      soft_skill_evidence: '软技能',
+      tech: '技术能力',
+      project: '项目经验',
+      academic: '学业基础',
+      domain: '领域知识',
+      soft: '软技能',
+    }
+
     // Sort gaps to show largest gaps first
     const sortedGaps = [...gaps].slice(0, 6).reverse()
 
@@ -461,7 +482,13 @@ export default function EnterpriseDashboard() {
         axisPointer: { type: 'shadow' },
         backgroundColor: isDark ? 'rgba(22, 24, 29, 0.95)' : 'rgba(248, 247, 244, 0.95)',
         borderColor: isDark ? '#2c2f3a' : '#e5e5ea',
-        textStyle: { color: isDark ? '#f5f6f9' : '#1d1d1f' }
+        textStyle: { color: isDark ? '#f5f6f9' : '#1d1d1f' },
+        formatter: (params: any) => {
+          const item = Array.isArray(params) ? params[0] : params
+          if (!item) return ''
+          const sign = item.value > 0 ? '+' : ''
+          return `能力项: <b>${item.name}</b><br/>差距值: <b style="color:${item.value >= 0 ? '#34c759' : '#ff3b30'}">${sign}${item.value}</b>`
+        }
       },
       grid: {
         left: '3%',
@@ -474,12 +501,19 @@ export default function EnterpriseDashboard() {
         type: 'value',
         max: 100,
         min: -100,
+        name: '差距值',
+        nameTextStyle: { color: isDark ? '#a0a5b5' : '#6e6e73', fontSize: 11 },
         splitLine: { lineStyle: { color: isDark ? '#2c2f3a' : '#e5e5ea' } },
         axisLabel: { color: isDark ? '#a0a5b5' : '#6e6e73' }
       },
       yAxis: {
         type: 'category',
-        data: sortedGaps.map(g => g.skill_name || g.name),
+        data: sortedGaps.map((g: any) => {
+          const skillName = g.skill_name || g.name || g.skill || ''
+          if (skillName) return skillName
+          const dim = g.dimension || ''
+          return dimLabelMap[dim] || dim
+        }),
         axisLine: { lineStyle: { color: isDark ? '#2c2f3a' : '#e5e5ea' } },
         axisLabel: { color: isDark ? '#a0a5b5' : '#6e6e73', fontSize: 11 }
       },
@@ -487,8 +521,8 @@ export default function EnterpriseDashboard() {
         {
           name: '能力差距',
           type: 'bar',
-          data: sortedGaps.map(g => {
-            const val = g.gap || (g.student_score - g.required_score) || 0
+          data: sortedGaps.map((g: any) => {
+            const val = g.gap ?? (g.student_score !== undefined && g.required_score !== undefined ? g.student_score - g.required_score : 0)
             return {
               value: val,
               itemStyle: {
@@ -775,6 +809,21 @@ export default function EnterpriseDashboard() {
                               {job.status === 'disabled' && '已下线'}
                             </span>
                           </div>
+                          {/* Gap 3: potential match badge for approved jobs */}
+                          {job.status === 'approved' && (() => {
+                            const stat = jobMatchStats.find((s: any) => s.job_post_id === job.id)
+                            const authorized = stat?.authorized_count ?? 0
+                            const potential = stat?.potential_match_count ?? 0
+                            if (authorized === 0 && potential === 0) return null
+                            return (
+                              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-secondary)', display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>👤 {authorized}</span>
+                                {potential > 0 && (
+                                  <span style={{ color: 'var(--accent-warning)' }}>🔍 +{potential} 潜在</span>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </div>
                       )
                     })
@@ -880,11 +929,21 @@ export default function EnterpriseDashboard() {
                           编辑岗位
                         </button>
                       )}
-                      {selectedJob.status === 'approved' && (
-                        <button className="btn btn-primary btn-sm" onClick={() => handleViewJobCandidates(selectedJob.id, selectedJob.title)}>
-                          查看授权候选人
-                        </button>
-                      )}
+                      {selectedJob.status === 'approved' && (() => {
+                        const stat = jobMatchStats.find((s: any) => s.job_post_id === selectedJob.id)
+                        const authCount = stat?.authorized_count ?? 0
+                        const potCount = stat?.potential_match_count ?? 0
+                        return (
+                          <button className="btn btn-primary btn-sm" onClick={() => handleViewJobCandidates(selectedJob.id, selectedJob.title)}>
+                            查看授权候选人
+                            {(authCount > 0 || potCount > 0) && (
+                              <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.85 }}>
+                                (已授权 {authCount}{potCount > 0 ? ` · 潜在 +${potCount}` : ''})
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })()}
                     </div>
 
                     {/* Detail contents */}
@@ -1036,12 +1095,19 @@ export default function EnterpriseDashboard() {
           )}
 
           {/* ===== Tab: Candidates ===== */}
-          {activeTab === 'candidates_for_job' && (
+          {activeTab === 'candidates_for_job' && (() => {
+            const stat = jobMatchStats.find((s: any) => s.job_post_id === candidatesJobId)
+            const authCount = stat?.authorized_count ?? candidates.length
+            const potCount = stat?.potential_match_count ?? 0
+            return (
             <div className="surface-card">
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('jobs')}>← 返回岗位</button>
                 <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
                   岗位「{candidatesJobTitle}」的授权候选人
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  (已授权 {authCount}{potCount > 0 ? ` · 潜在匹配 +${potCount}` : ''})
                 </span>
               </div>
               {candidatesLoading ? (
@@ -1050,9 +1116,15 @@ export default function EnterpriseDashboard() {
                 <div className="empty-state" style={{ padding: 'var(--space-xxl)' }}>
                   <span style={{ fontSize: 40 }}>👥</span>
                   <span style={{ fontSize: 14 }}>暂无学生授权其 AI 画像到您的在招岗位。</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)', maxWidth: 460 }}>
-                    学生在学生端完成 AI 画像诊断后，如果选择了您的岗位作为诊断目标，可以主动选择"授权"将画像公开给您查看。
-                  </span>
+                  {potCount > 0 ? (
+                    <span style={{ fontSize: 12, color: 'var(--accent-warning)', maxWidth: 460, marginTop: 8 }}>
+                      💡 提示：有 {potCount} 名学生的 AI 画像与「{candidatesJobTitle}」岗位特征匹配，但尚未授权。您可以通过学校管理员推荐或等待学生主动授权。
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)', maxWidth: 460 }}>
+                      学生在学生端完成 AI 画像诊断后，如果选择了您的岗位作为诊断目标，可以主动选择"授权"将画像公开给您查看。
+                    </span>
+                  )}
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
@@ -1070,9 +1142,25 @@ export default function EnterpriseDashboard() {
                     <tbody>
                       {candidates.map((cand) => {
                         const pct = Math.round(cand.match_score * 100)
+                        const hasReEvaluated = cand.is_latest_version === false
                         return (
-                          <tr key={cand.auth_id}>
-                            <td style={{ fontWeight: 600 }}>{cand.student_name}</td>
+                          <tr key={cand.auth_id} style={hasReEvaluated ? { background: 'rgba(255,159,28,0.04)' } : undefined}>
+                            <td style={{ fontWeight: 600 }}>
+                              {cand.student_name}
+                              {hasReEvaluated && (
+                                <span style={{
+                                  marginLeft: 8,
+                                  fontSize: 10,
+                                  padding: '1px 6px',
+                                  borderRadius: 6,
+                                  background: 'rgba(255,159,28,0.18)',
+                                  color: 'var(--accent-warning)',
+                                  fontWeight: 600,
+                                }} title="该学生已复评，以下为最新诊断数据">
+                                  已复评
+                                </span>
+                              )}
+                            </td>
                             <td>{cand.student_grade} · {cand.student_major}</td>
                             <td>{cand.job_title}</td>
                             <td style={{ textAlign: 'center' }}>
@@ -1083,6 +1171,11 @@ export default function EnterpriseDashboard() {
                               }`} style={{ fontWeight: 700, fontSize: 14 }}>
                                 {pct}%
                               </span>
+                              {hasReEvaluated && (
+                                <div style={{ fontSize: 10, color: 'var(--accent-warning)', marginTop: 2 }}>
+                                  V{cand.diagnosis_version}
+                                </div>
+                              )}
                             </td>
                             <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
                               {cand.auth_date ? new Date(cand.auth_date).toLocaleDateString() : '-'}
@@ -1104,7 +1197,7 @@ export default function EnterpriseDashboard() {
                 </div>
               )}
             </div>
-          )}
+          )})()}
         </div>
 
         {/* ===== Candidate Comparison Modal ===== */}
@@ -1148,6 +1241,28 @@ export default function EnterpriseDashboard() {
                     &times;
                   </button>
                 </div>
+
+                {/* Gap 7: Re-evaluation notice — 学生已复评，展示最新诊断数据 */}
+                {selectedCandidate.is_latest_version === false && (
+                  <div style={{
+                    margin: '0 24px',
+                    padding: '10px 16px',
+                    borderRadius: 8,
+                    background: 'rgba(255,159,28,0.1)',
+                    border: '1px solid rgba(255,159,28,0.3)',
+                    fontSize: 13,
+                    color: 'var(--accent-warning)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}>
+                    <span style={{ fontSize: 16 }}>🔄</span>
+                    <span>
+                      <strong>该学生已于授权后复评</strong>，以下展示的是最新诊断数据（V{selectedCandidate.diagnosis.version}）。
+                      匹配评分和五维能力可能已发生变化。
+                    </span>
+                  </div>
+                )}
 
                 {/* Modal Scroll Content */}
                 <div className="modal-body">
