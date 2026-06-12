@@ -1,4 +1,4 @@
-# 职达（Zhi-Da）—— AI 人才成长智能体
+# 职达AI人才成长智能体
 
 > **TalentPath v2.0.1** | 桂林电子科技大学 · 第二十一届中国研究生电子设计竞赛"润建"专项赛 · 方向1
 >
@@ -37,8 +37,8 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/ccnnd/zhi-da
-cd zhi-da
+git clone https://github.com/ccnnd/zhi-da 职达
+cd 职达
 
 # 配置 LLM API Key（可选，不配置则 AI 功能降级为规则模式）
 echo "LLM_API_KEY=sk-your-key" > .env
@@ -100,6 +100,19 @@ cd frontend && npx vitest run
 # Docker 环境运行测试
 docker compose exec -T backend python -m pytest
 ```
+
+
+---
+
+## 评委快速验证
+
+1. 安装 Docker Desktop，并确认 `docker compose version` 可正常输出。
+2. 在项目根目录执行 `docker compose up -d --build`，首次启动会自动构建前端、后端并初始化数据库。
+3. 执行 `curl http://localhost:8000/api/health`，返回 `status: ok` 即表示后端服务可用。
+4. 浏览器访问 `http://localhost` 进入前端页面，按演示视频流程依次验证学生端能力诊断、岗位匹配、成长任务、企业端候选人查看和学校端管理功能。
+5. 如需验证测试套件，可进入 `backend` 运行 `python -m pytest tests/ -v`，进入 `frontend` 运行 `npx vitest run`。
+
+说明：`LLM_API_KEY` 未配置时，系统仍可启动并进入规则降级模式；配置兼容 OpenAI 协议的大模型密钥后，可启用完整 AI 诊断、建议生成和证据复审能力。
 
 ---
 
@@ -245,7 +258,7 @@ docker compose up -d --build
 ## 项目结构
 
 ```
-zhi-da/
+职达/
 ├── backend/                         # Python 后端
 │   ├── main.py                      # FastAPI 应用入口
 │   ├── config/settings.py           # 全局配置
