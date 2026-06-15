@@ -300,15 +300,8 @@ export default function Home() {
                 />
               </div>
 
-              {role === 'enterprise' && selectedEnterprise && (
-                <div className="login-enterprise-note">
-                  <span>行业：{selectedEnterprise.industry || '未指定'}</span>
-                  <span>编码：{selectedEnterprise.id}</span>
-                </div>
-              )}
-
               {message && (
-                <div className="login-message" style={{ borderColor: 'rgba(255,59,48,0.15)' }}>
+                <div className="login-message" style={{ borderColor: 'rgba(var(--accent-danger-rgb), 0.15)' }}>
                   {message}
                 </div>
               )}

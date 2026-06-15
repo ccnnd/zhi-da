@@ -27,6 +27,12 @@
   --accent-violet: #af52de;
   --accent-success: #34c759;
 
+/* RGB channels for alpha-aware usage: rgba(var(--accent-primary-rgb), 0.12) */
+  --accent-primary-rgb: 0, 113, 227;
+  --accent-success-rgb: 52, 199, 89;
+  --accent-warning-rgb: 255, 159, 10;
+  --accent-danger-rgb: 255, 59, 48;
+
 /* Border subtle alias */
   --border-subtle: rgba(0, 0, 0, 0.04);
 
@@ -57,9 +63,9 @@
   --radius-xl: 28px;
   --radius-2xl: 36px;
 
-/* Typography */
-  --text-xs: 11px;
-  --text-sm: 13px;
+/* Typography —— 中文最小可读字号 12px 起步 */
+  --text-xs: 12px;
+  --text-sm: 14px;
   --text-base: 15px;
   --text-lg: 18px;
   --text-xl: 24px;
@@ -112,6 +118,10 @@ body.dark {
   --accent-violet: #bf5af2;
   --accent-success: #30d158;
   --border-subtle: rgba(255, 255, 255, 0.04);
+  --accent-primary-rgb: 10, 132, 255;
+  --accent-success-rgb: 48, 209, 88;
+  --accent-warning-rgb: 255, 214, 10;
+  --accent-danger-rgb: 255, 69, 58;
   --glass-bg: rgba(28, 28, 30, 0.72);
   --glass-bg-heavy: rgba(28, 28, 30, 0.92);
   --glass-border: rgba(255, 255, 255, 0.08);
@@ -862,17 +872,19 @@ body.dark .badge-danger  { color: #ff453a; }
   border-bottom: 1px solid var(--border-light);
 }
 .data-table th {
-  padding: 12px 16px;
+  padding: 14px 16px;
   color: var(--text-secondary);
   font-weight: 600;
   font-size: var(--text-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
+  line-height: 1.4;
 }
 .data-table td {
-  padding: 12px 16px;
+  padding: 14px 16px;
   color: var(--text-primary);
+  line-height: 1.5;
 }
 .data-table tbody tr {
   border-bottom: 1px solid var(--border-light);
@@ -1180,6 +1192,10 @@ body.dark .login-topbar {
   border-radius: var(--radius-md);
   background: var(--bg-card);
   border: 1px solid var(--border-card);
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .login-metrics strong {
@@ -1493,7 +1509,7 @@ body.dark .login-message { color: #ffd60a; }
   padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ai-panel-label {
