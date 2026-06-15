@@ -6,6 +6,8 @@ const GrowthTrend = React.lazy(() => import('../charts/GrowthTrend'))
 
 interface Props {
   history: DiagnosisResult[]
+  /** 跳转到诊断解释 Tab（用于版本对比卡片的"查看详情"） */
+  onNavigateToDiagnosis?: () => void
 }
 
 const dimLabels: Record<string, string> = {
@@ -23,7 +25,7 @@ const dimLabels: Record<string, string> = {
   soft: '软技能',
 }
 
-const GrowthTab: FC<Props> = ({ history }) => {
+const GrowthTab: FC<Props> = ({ history, onNavigateToDiagnosis }) => {
   const [compareA, setCompareA] = useState<number | null>(null)
   const [compareB, setCompareB] = useState<number | null>(null)
 
@@ -66,7 +68,8 @@ const GrowthTab: FC<Props> = ({ history }) => {
         </div>
       </div>
 
-      {/* 版本对比面板 */}
+      {/* 版本对比面板——需要至少 2 个版本才有意义 */}
+      {sorted.length >= 2 ? (
       <div style={{ padding: 16, borderRadius: 10, border: '1px solid var(--border-light)', background: 'var(--bg-card)' }}>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 10, letterSpacing: '1px', textTransform: 'uppercase' }}>
           版本对比
@@ -96,17 +99,17 @@ const GrowthTab: FC<Props> = ({ history }) => {
         </div>
 
         {verA && verB && verA.version === verB.version && (
-          <div style={{ textAlign: 'center', padding: 16, color: 'var(--accent-warning)', fontSize: 13, background: 'rgba(255,149,0,0.08)', borderRadius: 8, border: '1px solid rgba(255,149,0,0.2)' }}>
+          <div style={{ textAlign: 'center', padding: 16, color: 'var(--accent-warning)', fontSize: 13, background: 'rgba(var(--accent-warning-rgb), 0.08)', borderRadius: 8, border: '1px solid rgba(var(--accent-warning-rgb), 0.2)' }}>
             请选择不同的版本进行对比
           </div>
         )}
         {verA && verB && verA.version !== verB.version && dims.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 60px', gap: 8, fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 90px 90px 70px', gap: 12, fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>
               <span>维度</span><span style={{ textAlign: 'center' }}>A (V{verA.version})</span><span style={{ textAlign: 'center' }}>B (V{verB.version})</span><span style={{ textAlign: 'center' }}>变化</span>
             </div>
             {dims.map(dim => (
-              <div key={dim.key} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 60px', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--border-light)', fontSize: 12, alignItems: 'center' }}>
+              <div key={dim.key} style={{ display: 'grid', gridTemplateColumns: '1.4fr 90px 90px 70px', gap: 12, padding: '12px 0', borderBottom: '1px solid var(--border-light)', fontSize: 13, alignItems: 'center' }}>
                 <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{dimLabels[dim.key] || dim.key}</span>
                 <span style={{ textAlign: 'center', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{(dim.valA * 100).toFixed(0)}%</span>
                 <span style={{ textAlign: 'center', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{(dim.valB * 100).toFixed(0)}%</span>
@@ -121,6 +124,13 @@ const GrowthTab: FC<Props> = ({ history }) => {
           <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-tertiary)', fontSize: 12 }}>请选择两个版本进行对比</div>
         )}
       </div>
+      ) : (
+        <div className="surface-card" style={{ padding: 'var(--space-5)', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            完成 1 次复评后，这里将展示版本对比，量化你的能力提升轨迹。
+          </div>
+        </div>
+      )}
 
       {/* 诊断历史列表 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

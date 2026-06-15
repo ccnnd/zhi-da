@@ -132,14 +132,10 @@ class StudentPlanner:
                 return "diagnose_student"
             return "plan_growth_tasks"
 
-        # ask 意图 —— 根据问题内容和状态选择 Skill
+        # ask 意图 —— 统一由 answer_student_question 处理，
+        # 问题类型差异化（诊断/成长/岗位等）在 runtime 层由 classify_question 完成，
+        # planner 层不做状态分支（避免误导维护者以为有差异化决策）。
         if intent == "ask":
-            # 有未完成任务时，优先引导成长
-            if state.pending_tasks > 0 and state.completed_tasks > 0:
-                return "answer_student_question"
-            # 无诊断时引导诊断
-            if not state.has_diagnosis and state.is_complete:
-                return "answer_student_question"
             return "answer_student_question"
 
         # navigate 意图 —— 授权相关页面

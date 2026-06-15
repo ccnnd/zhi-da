@@ -53,6 +53,19 @@ export default function EnterpriseDashboard() {
   const navigate = useNavigate()
   const enterpriseId = currentEnterpriseId || '1'
   const [activeTab, setActiveTab] = useState<'jobs' | 'candidates_for_job'>('jobs')
+  const [accessDenied, setAccessDenied] = useState(false)
+
+  // 检测 403 角色错配：当前 token 不是 enterprise 角色时，清除企业会话并跳回首页
+  const handleApiError = (err: any) => {
+    const status = err?.response?.status
+    const detail: string = err?.response?.data?.detail || ''
+    if (status === 403 && (detail.includes('需要企业身份') || detail.includes('需要') )) {
+      setAccessDenied(true)
+      localStorage.removeItem('zhida_enterprise_id')
+      toast.error(detail || '当前账号无企业权限，请重新登录')
+      setTimeout(() => navigate('/'), 800)
+    }
+  }
 
   // Theme states
   const isDark = theme === 'dark'
@@ -121,8 +134,9 @@ export default function EnterpriseDashboard() {
   }
 
   // Load jobs list
-  const loadJobs = async (selectId?: string) => {
-    setJobsLoading(true)
+  const loadJobs = async (selectId?: string, silent?: boolean) => {
+    if (accessDenied) return
+    if (!silent) setJobsLoading(true)
     try {
       const data = await getEnterpriseJobs(enterpriseId)
       setJobs(data)
@@ -137,14 +151,16 @@ export default function EnterpriseDashboard() {
       }
     } catch (err) {
       console.error('Failed to load jobs', err)
+      handleApiError(err)
     } finally {
       setJobsLoading(false)
     }
   }
 
   // Load candidate list (Gap 3: now returns { candidates, job_match_stats })
-  const loadCandidates = async (jobId?: string) => {
-    setCandidatesLoading(true)
+  const loadCandidates = async (jobId?: string, silent?: boolean) => {
+    if (accessDenied) return
+    if (!silent) setCandidatesLoading(true)
     try {
       const data = await getEnterpriseCandidates(enterpriseId)
       // Handle new format: { candidates, job_match_stats } or legacy flat array
@@ -155,6 +171,7 @@ export default function EnterpriseDashboard() {
       setCandidates(jobId ? candidateList.filter((c: any) => c.job_post_id === jobId) : candidateList)
     } catch (err) {
       console.error('Failed to load candidates', err)
+      handleApiError(err)
     } finally {
       setCandidatesLoading(false)
     }
@@ -178,6 +195,20 @@ export default function EnterpriseDashboard() {
       loadCandidates(candidatesJobId)
     }
   }, [activeTab, enterpriseId])
+
+  // 定时轮询：每 10 秒静默刷新候选人数据，实时同步学生端授权变更
+  useEffect(() => {
+    if (accessDenied) return  // 权限被拒绝时不轮询
+    const interval = setInterval(() => {
+      if (activeTab === 'jobs') {
+        loadJobs(undefined, true)
+        loadCandidates(undefined, true)
+      } else if (activeTab === 'candidates_for_job') {
+        loadCandidates(candidatesJobId, true)
+      }
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [activeTab, enterpriseId, candidatesJobId, accessDenied])
 
   // Select job item and fetch ability model
   const handleSelectJob = async (job: JobPost) => {
@@ -258,8 +289,31 @@ export default function EnterpriseDashboard() {
         setIsEditingJob(false)
         await loadJobs(updated.id)
       }
-    } catch (err) {
-      toast.error('保存岗位失败')
+    } catch (err: any) {
+      handleApiError(err)
+      if (!accessDenied) toast.error('保存岗位失败')
+    } finally {
+      setJobsLoading(false)
+    }
+  }
+
+  // 岗位上线/下线（已审核通过岗位的招聘状态管理，不经过审核）
+  const handleToggleJobOnline = async () => {
+    if (!selectedJob) return
+    const goingOffline = selectedJob.status === 'approved'
+    const ok = window.confirm(goingOffline
+      ? `下线「${selectedJob.title}」后，学生将无法再看到该岗位，已授权候选人不受影响。确认下线？`
+      : `重新上线「${selectedJob.title}」，学生将再次看到该岗位。确认上线？`)
+    if (!ok) return
+    setJobsLoading(true)
+    try {
+      const updated = await updateEnterpriseJob(selectedJob.id, enterpriseId, {
+        status: goingOffline ? 'disabled' : 'approved',
+      })
+      await loadJobs(updated.id)
+      toast.success(goingOffline ? '岗位已下线' : '岗位已重新上线')
+    } catch (err: any) {
+      toast.error(goingOffline ? '下线失败' : '上线失败')
     } finally {
       setJobsLoading(false)
     }
@@ -360,8 +414,8 @@ export default function EnterpriseDashboard() {
               getVal(dimScores.soft_skill_evidence ?? dimScores.soft_evidence)
             ],
             name: '学生画像',
-            areaStyle: { color: 'rgba(0,113,227, 0.3)' },
-            lineStyle: { color: '#0071e3' }
+            areaStyle: { color: 'rgba(var(--accent-primary-rgb), 0.3)' },
+            lineStyle: { color: 'var(--accent-primary)' }
           }]
         }]
       }
@@ -393,7 +447,7 @@ export default function EnterpriseDashboard() {
     const jobValues = indicators.map(ind => ind.val)
 
     return {
-      color: ['#0071e3', '#0071e3'],
+      color: ['var(--accent-primary)', 'var(--accent-primary)'],
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'axis',
@@ -435,7 +489,7 @@ export default function EnterpriseDashboard() {
               name: '学生掌握能力',
               symbol: 'circle',
               symbolSize: 5,
-              areaStyle: { color: 'rgba(0,113,227, 0.25)' },
+              areaStyle: { color: 'rgba(var(--accent-primary-rgb), 0.25)' },
               lineStyle: { width: 2 }
             },
             {
@@ -443,7 +497,7 @@ export default function EnterpriseDashboard() {
               name: '岗位特征要求',
               symbol: 'none',
               lineStyle: { type: 'dashed', width: 1.5 },
-              areaStyle: { color: 'rgba(0,113,227, 0.08)' }
+              areaStyle: { color: 'rgba(var(--accent-primary-rgb), 0.08)' }
             }
           ]
         }
@@ -487,7 +541,7 @@ export default function EnterpriseDashboard() {
           const item = Array.isArray(params) ? params[0] : params
           if (!item) return ''
           const sign = item.value > 0 ? '+' : ''
-          return `能力项: <b>${item.name}</b><br/>差距值: <b style="color:${item.value >= 0 ? '#34c759' : '#ff3b30'}">${sign}${item.value}</b>`
+          return `能力项: <b>${item.name}</b><br/>差距值: <b style="color:${item.value >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${sign}${item.value}</b>`
         }
       },
       grid: {
@@ -526,7 +580,7 @@ export default function EnterpriseDashboard() {
             return {
               value: val,
               itemStyle: {
-                color: val >= 0 ? '#34c759' : '#ff3b30',
+                color: val >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)',
                 borderRadius: [0, 4, 4, 0]
               }
             }
@@ -596,8 +650,8 @@ export default function EnterpriseDashboard() {
           transition: width 0.3s ease;
         }
         .ed-rejected-banner {
-          background: rgba(255,59,48, 0.08);
-          border: 1px solid rgba(255,59,48, 0.2);
+          background: rgba(var(--accent-danger-rgb), 0.08);
+          border: 1px solid rgba(var(--accent-danger-rgb), 0.2);
           padding: var(--space-sm) var(--space-md);
           border-radius: var(--radius-sm);
           color: var(--accent-danger);
@@ -630,12 +684,12 @@ export default function EnterpriseDashboard() {
           border-radius: var(--radius-md);
         }
         .ed-risk-card-danger {
-          border: 1px solid rgba(255,59,48, 0.3);
-          background: rgba(255,59,48, 0.04);
+          border: 1px solid rgba(var(--accent-danger-rgb), 0.3);
+          background: rgba(var(--accent-danger-rgb), 0.04);
         }
         .ed-risk-card-safe {
-          border: 1px solid rgba(52,199,89, 0.3);
-          background: rgba(52,199,89, 0.04);
+          border: 1px solid rgba(var(--accent-success-rgb), 0.3);
+          background: rgba(var(--accent-success-rgb), 0.04);
         }
         .ed-soft-level {
           font-size: 9.5px;
@@ -693,7 +747,7 @@ export default function EnterpriseDashboard() {
         }
         .ed-ai-card {
           border: 1px solid var(--accent-primary);
-          background: rgba(0,113,227, 0.05);
+          background: rgba(var(--accent-primary-rgb), 0.05);
           padding: var(--space-lg);
           border-radius: var(--radius-md);
         }
@@ -715,13 +769,8 @@ export default function EnterpriseDashboard() {
             <span className="brand-divider" />
             <Building2 size={20} />
             <span>企业工作台</span>
-            {profile?.name && (
-              <span className="tag tag-blue" style={{ marginLeft: 'var(--space-sm)' }}>
-                {profile.name}
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
-              {profile?.name || enterpriseId}
+            <span className="tag tag-blue" style={{ marginLeft: 'var(--space-sm)' }}>
+              {profile?.name || (profileLoading ? '加载中...' : '企业')}
             </span>
           </div>
           <div className="bento-topbar-actions">
@@ -759,10 +808,10 @@ export default function EnterpriseDashboard() {
 
           {/* ===== Tab: Jobs ===== */}
           {activeTab === 'jobs' && (
-            <div style={{ display: 'flex', gap: 'var(--space-xl)', minHeight: '520px', maxHeight: 'calc(100vh - 200px)', alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', gap: 'var(--space-xl)', minHeight: '600px', maxHeight: 'calc(100vh - 150px)', alignItems: 'stretch' }}>
               {/* Left Column: Job List */}
               <div className="surface-card" style={{
-                width: 320,
+                width: 380,
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
@@ -934,16 +983,26 @@ export default function EnterpriseDashboard() {
                         const authCount = stat?.authorized_count ?? 0
                         const potCount = stat?.potential_match_count ?? 0
                         return (
-                          <button className="btn btn-primary btn-sm" onClick={() => handleViewJobCandidates(selectedJob.id, selectedJob.title)}>
-                            查看授权候选人
-                            {(authCount > 0 || potCount > 0) && (
-                              <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.85 }}>
-                                (已授权 {authCount}{potCount > 0 ? ` · 潜在 +${potCount}` : ''})
-                              </span>
-                            )}
-                          </button>
+                          <>
+                            <button className="btn btn-primary btn-sm" onClick={() => handleViewJobCandidates(selectedJob.id, selectedJob.title)}>
+                              查看授权候选人
+                              {(authCount > 0 || potCount > 0) && (
+                                <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.85 }}>
+                                  (已授权 {authCount}{potCount > 0 ? ` · 潜在 +${potCount}` : ''})
+                                </span>
+                              )}
+                            </button>
+                            <button className="btn btn-ghost btn-sm" onClick={handleToggleJobOnline} title="下线后学生将不再看到该岗位">
+                              暂停招聘
+                            </button>
+                          </>
                         )
                       })()}
+                      {selectedJob.status === 'disabled' && (
+                        <button className="btn btn-primary btn-sm" onClick={handleToggleJobOnline}>
+                          重新上线
+                        </button>
+                      )}
                     </div>
 
                     {/* Detail contents */}

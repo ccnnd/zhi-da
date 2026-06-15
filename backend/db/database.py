@@ -32,7 +32,7 @@ async def _ensure_enterprise(session: AsyncSession, eid: str, **kwargs):
 
 
 async def _ensure_job_post(session: AsyncSession, jid: str, **kwargs):
-    """幂等插入岗位：不存在则插入，已存在则只补空字段。"""
+    """幂等插入岗位：不存在则插入，已存在则补空字段并强制同步 requirements_text。"""
     from db.models import JobPost
     jp = await session.get(JobPost, jid)
     if jp is None:
@@ -40,8 +40,13 @@ async def _ensure_job_post(session: AsyncSession, jid: str, **kwargs):
         session.add(jp)
         return
     for key, value in kwargs.items():
+        if key == "requirements_text":
+            continue  # requirements_text 单独处理，始终强制同步
         if getattr(jp, key, None) in (None, ""):
             setattr(jp, key, value)
+    # requirements_text 始终与种子数据保持一致（确保岗位要求描述与目标人群匹配）
+    if "requirements_text" in kwargs:
+        jp.requirements_text = kwargs["requirements_text"]
 
 
 async def _ensure_ability_model(session: AsyncSession, job_post_id: str, **kwargs):
@@ -62,6 +67,72 @@ async def _ensure_job_direction(session: AsyncSession, jid: str, **kwargs):
     if j is None:
         j = Job(id=jid, **kwargs)
         session.add(j)
+
+
+# 迁移只运行一次（防止 TestClient lifespan 重复触发）
+_growth_migrated = False
+
+
+async def _migrate_single_phase_growth():
+    """将旧版单阶段成长路径扩展为三阶段，并清除旧 GrowthTask 以触发重建。"""
+    global _growth_migrated
+    if _growth_migrated:
+        return
+    _growth_migrated = True
+
+    import json as _json
+    from db.models import DiagnosisResult, GrowthTask, TaskProgress
+    from sqlalchemy import select as _select, delete as _delete
+
+    _standard_3phases = [
+        {"goal": "夯实基础", "weeks": 3, "tasks": [
+            {"name": "核心技能专项训练", "description": "针对最薄弱的技能进行专项练习，打牢基础",
+             "resources": [], "criteria": "技能评分达到65+",
+             "linked_gap": "基础能力不足", "target_dimension": "tech_skills",
+             "expected_impact": {"tech_skills": 0.05}}
+        ]},
+        {"goal": "项目实践", "weeks": 4, "tasks": [
+            {"name": "实战项目开发", "description": "通过完整项目实践，将理论知识转化为实际能力",
+             "resources": [], "criteria": "完成至少1个完整项目",
+             "linked_gap": "缺乏项目经验", "target_dimension": "project_exp",
+             "expected_impact": {"project_exp": 0.08}}
+        ]},
+        {"goal": "综合提升", "weeks": 3, "tasks": [
+            {"name": "模拟面试与复盘", "description": "通过模拟面试查漏补缺，全面提升竞争力",
+             "resources": [], "criteria": "模拟面试通过率80%+",
+             "linked_gap": "综合竞争力", "target_dimension": "soft_skill_evidence",
+             "expected_impact": {"soft_skill_evidence": 0.05}}
+        ]},
+    ]
+
+    async with async_session() as session:
+        result = await session.execute(_select(DiagnosisResult))
+        diags = result.scalars().all()
+
+        updated = 0
+        for diag in diags:
+            gp = diag.growth_path
+            if not gp or not isinstance(gp, dict):
+                continue
+            phases = gp.get("phases", [])
+            if not isinstance(phases, list) or len(phases) >= 2:
+                continue
+
+            # 旧数据：少于 2 个阶段 → 扩展为三阶段
+            diag.growth_path = {"phases": _standard_3phases}
+
+            # 删除旧的 GrowthTask 记录（将在下次 continue_growth 时从新 growth_path 重建）
+            await session.execute(
+                _delete(GrowthTask).where(GrowthTask.diagnosis_id == diag.id)
+            )
+            # 删除旧的 TaskProgress 记录
+            await session.execute(
+                _delete(TaskProgress).where(TaskProgress.diagnosis_id == diag.id)
+            )
+            updated += 1
+
+        if updated > 0:
+            await session.commit()
 
 
 async def init_db():
@@ -135,12 +206,12 @@ async def init_db():
         await _ensure_job_post(session, 'post_1', enterprise_id='1', title='Python后端开发工程师',
             category='后端开发',
             description='负责字节跳动核心业务平台的后端架构设计与开发工作，参与分布式微服务系统的设计与优化，保障亿级用户场景下的高可用与高性能。',
-            requirements_text='【岗位职责】\n1. 负责公司核心业务平台的后端服务设计与开发，基于 Python/FastAPI 构建高性能微服务\n2. 设计并实现高并发、低延迟的分布式系统，包括任务调度、消息队列、缓存策略等\n3. 参与数据库架构设计，优化 SQL 查询性能，保障数据一致性与完整性\n4. 编写技术文档与接口规范，推动团队代码规范与 Code Review 文化\n5. 配合前端和算法团队完成跨模块联调与系统集成\n\n【任职要求】\n1. 本科及以上学历，计算机相关专业，3年以上 Python 后端开发经验\n2. 精通 Python，熟悉 FastAPI/Flask/Django 等主流 Web 框架\n3. 熟悉 MySQL、Redis、MongoDB 等主流存储方案，有分库分表经验优先\n4. 了解 Docker、Kubernetes 等容器化部署技术，有 CI/CD 实践经验\n5. 熟悉 Linux 环境下的性能调优与故障排查\n6. 具备良好的系统设计能力，能独立完成从需求分析到上线的全流程',
+            requirements_text='【岗位职责】\n1. 负责公司核心业务平台的后端服务设计与开发，基于 Python/FastAPI 构建高性能微服务\n2. 设计并实现高并发、低延迟的分布式系统，包括任务调度、消息队列、缓存策略等\n3. 参与数据库架构设计，优化 SQL 查询性能，保障数据一致性与完整性\n4. 编写技术文档与接口规范，推动团队代码规范与 Code Review 文化\n5. 配合前端和算法团队完成跨模块联调与系统集成\n\n【任职要求】\n1. 本科及以上学历（含应届），计算机科学、软件工程等相关专业\n2. 扎实的 Python 编程基础，熟悉 FastAPI/Flask/Django 中至少一种 Web 框架\n3. 熟悉 MySQL、Redis 等主流存储方案，有数据库课程项目或竞赛经验优先\n4. 了解 Docker 等容器技术，有课程项目或个人项目实践经验\n5. 熟悉 Linux 基本操作，具备基本的调试与问题排查能力\n6. 学习能力强，有良好的逻辑思维与团队协作精神，有相关实习经验者优先',
             status='approved')
         await _ensure_job_post(session, 'post_2', enterprise_id='1', title='前端开发工程师',
             category='前端开发',
             description='负责抖音电商业务线的前端开发工作，参与用户端交互体验的设计与实现，推动前端工程化与性能优化，打造极致的购物体验。',
-            requirements_text='【岗位职责】\n1. 负责抖音电商核心页面的开发与维护，包括商品详情页、购物车、结算流程等\n2. 基于 React + TypeScript 构建高性能单页应用，保障首屏加载速度与交互流畅度\n3. 主导前端性能优化，包括资源加载策略、渲染性能调优、Web Vitals 指标监控\n4. 参与前端组件库建设，沉淀可复用的业务组件与工具函数\n5. 与产品、设计团队紧密协作，将设计稿高保真还原为可交互的页面\n\n【任职要求】\n1. 本科及以上学历，计算机或设计相关专业，2年以上前端开发经验\n2. 精通 HTML/CSS/JavaScript，深入理解浏览器渲染原理与事件机制\n3. 熟练掌握 React 生态（Hooks、Redux/Zustand、React Router），有大型项目经验\n4. 熟悉 Webpack/Vite 等构建工具，了解前端工程化最佳实践\n5. 了解 Node.js，有 SSR/SSG 实战经验优先\n6. 关注用户体验，有良好的设计审美和细节把控能力',
+            requirements_text='【岗位职责】\n1. 负责抖音电商核心页面的开发与维护，包括商品详情页、购物车、结算流程等\n2. 基于 React + TypeScript 构建高性能单页应用，保障首屏加载速度与交互流畅度\n3. 主导前端性能优化，包括资源加载策略、渲染性能调优、Web Vitals 指标监控\n4. 参与前端组件库建设，沉淀可复用的业务组件与工具函数\n5. 与产品、设计团队紧密协作，将设计稿高保真还原为可交互的页面\n\n【任职要求】\n1. 本科及以上学历（含应届），计算机科学、软件工程或设计相关专业\n2. 扎实的 HTML/CSS/JavaScript 基础，理解浏览器渲染原理与事件机制\n3. 熟悉 React 生态（Hooks、状态管理、路由），有课程项目或个人项目经验\n4. 了解 Webpack/Vite 等构建工具，关注前端工程化最佳实践\n5. 了解 Node.js 基础，有 SSR/SSG 学习或实践经历优先\n6. 关注用户体验，有良好的设计审美和细节把控能力，有相关实习经验者优先',
             status='approved')
         await _ensure_job_post(session, 'post_3', enterprise_id='2', title='AI算法工程师',
             category='人工智能',
@@ -161,7 +232,7 @@ async def init_db():
         await _ensure_job_post(session, 'post_7', enterprise_id='6', title='游戏客户端开发工程师',
             category='游戏开发',
             description='加入天美工作室群，参与大型3D手游客户端的核心架构开发，负责渲染管线优化与游戏引擎功能开发，为玩家打造沉浸式游戏体验。',
-            requirements_text='【岗位职责】\n1. 负责手游客户端核心模块的架构设计与功能开发（基于Unity/自研引擎）\n2. 实现并优化3D渲染管线，包括PBR材质、实时光照、后处理特效等\n3. 开发游戏编辑器工具链，提升美术和策划团队的生产效率\n4. 进行客户端性能调优，关注帧率稳定性、内存占用和发热控制\n5. 解决多平台（iOS/Android/PC）适配和兼容性问题\n\n【任职要求】\n1. 本科及以上学历，计算机或图形学相关专业，3年以上游戏客户端开发经验\n2. 精通C++和C#，熟悉Unity引擎或Unreal引擎的底层架构\n3. 扎实的计算机图形学基础，理解渲染管线、着色器编程（HLSL/GLSL）\n4. 熟悉多线程编程、内存管理和性能分析工具\n5. 有完整的手游上线经验，了解移动端GPU特性（Tile-based Rendering等）\n6. 热爱游戏，对主流游戏的技术实现有深入研究者优先',
+            requirements_text='【岗位职责】\n1. 负责手游客户端核心模块的架构设计与功能开发（基于Unity/自研引擎）\n2. 实现并优化3D渲染管线，包括PBR材质、实时光照、后处理特效等\n3. 开发游戏编辑器工具链，提升美术和策划团队的生产效率\n4. 进行客户端性能调优，关注帧率稳定性、内存占用和发热控制\n5. 解决多平台（iOS/Android/PC）适配和兼容性问题\n\n【任职要求】\n1. 本科及以上学历（含应届），计算机科学、图形学等相关专业\n2. 扎实的C++和C#编程基础，了解Unity引擎或Unreal引擎的基本架构\n3. 具备计算机图形学基础，理解渲染管线和着色器编程（HLSL/GLSL）基本概念\n4. 了解多线程编程和性能分析基础，有游戏开发课程项目或个人Demo\n5. 热爱游戏，对主流游戏的技术实现有研究和思考\n6. 有游戏开发实习经验或参加过Game Jam等游戏开发活动者优先',
             status='approved')
         await _ensure_job_post(session, 'post_8', enterprise_id='7', title='推荐算法工程师',
             category='算法',
@@ -171,12 +242,12 @@ async def init_db():
         await _ensure_job_post(session, 'post_9', enterprise_id='8', title='Android系统开发工程师',
             category='移动端开发',
             description='加入小米手机系统部，参与MIUI/HyperOS核心功能的开发与优化，负责系统级应用和框架层的架构设计，为全球数亿MIUI用户打造流畅稳定的手机体验。',
-            requirements_text='【岗位职责】\n1. 负责MIUI/HyperOS系统应用的开发与维护，涵盖设置、文件管理、安全中心等核心模块\n2. 参与Android Framework层的定制开发，实现差异化系统功能\n3. 进行系统级性能优化，包括启动速度、滑动流畅度、内存占用等关键指标\n4. 适配小米自研芯片（澎湃系列），优化底层硬件协同效率\n5. 参与跨平台技术方案调研，推动Kotlin Multiplatform在系统应用中的落地\n\n【任职要求】\n1. 本科及以上学历，计算机、电子工程相关专业，2年以上Android开发经验\n2. 精通Java和Kotlin，深入理解Android四大组件、Binder通信、Handler机制\n3. 熟悉Android Framework源码，有系统应用或ROM定制开发经验\n4. 了解Android性能优化方法论（Systrace、Perfetto、内存泄漏检测等）\n5. 有NDK/JNI开发经验，能进行C/C++与Java的混合编程\n6. 对手机产品有热情，关注用户体验细节',
+            requirements_text='【岗位职责】\n1. 负责MIUI/HyperOS系统应用的开发与维护，涵盖设置、文件管理、安全中心等核心模块\n2. 参与Android Framework层的定制开发，实现差异化系统功能\n3. 进行系统级性能优化，包括启动速度、滑动流畅度、内存占用等关键指标\n4. 适配小米自研芯片（澎湃系列），优化底层硬件协同效率\n5. 参与跨平台技术方案调研，推动Kotlin Multiplatform在系统应用中的落地\n\n【任职要求】\n1. 本科及以上学历（含应届），计算机科学、电子工程等相关专业\n2. 扎实的Java或Kotlin编程基础，了解Android四大组件、Binder通信等核心机制\n3. 熟悉Android应用开发流程，有课程项目、竞赛项目或个人App开发经历\n4. 了解Android性能优化基本方法（内存泄漏检测、启动优化等）\n5. 对系统底层技术有兴趣，了解NDK/JNI基本概念者优先\n6. 对手机产品有热情，关注用户体验细节，有相关实习经验者优先',
             status='approved')
         await _ensure_job_post(session, 'post_10', enterprise_id='6', title='云原生后端开发工程师',
             category='后端开发',
             description='加入腾讯云云原生团队，负责容器服务（TKE）核心组件的开发与维护，参与Serverless、微服务治理等云原生产品的技术架构设计。',
-            requirements_text='【岗位职责】\n1. 负责腾讯云容器服务（TKE）控制面和数据面的核心开发，保障百万级集群规模下的稳定性\n2. 设计开发Kubernetes Operator和自定义控制器，扩展平台能力\n3. 参与Serverless容器（如EKS弹性容器）的调度优化与冷启动加速\n4. 开发服务网格（Service Mesh）功能，包括流量管理、可观测性和安全策略\n5. 编写自动化运维工具，提升大规模集群的运维效率\n\n【任职要求】\n1. 本科及以上学历，计算机相关专业，3年以上后端开发经验\n2. 精通Go语言，有Kubernetes/云原生领域开发经验\n3. 深入理解Kubernetes架构（API Server、Controller Manager、Scheduler、etcd）\n4. 熟悉容器运行时（containerd/CRI-O）、网络插件（Cilium/Calico）等底层技术\n5. 有分布式系统设计经验，了解一致性协议（Raft/Paxos）\n6. 有开源社区贡献经验（Kubernetes/Docker/Istio等）优先',
+            requirements_text='【岗位职责】\n1. 负责腾讯云容器服务（TKE）控制面和数据面的核心开发，保障百万级集群规模下的稳定性\n2. 设计开发Kubernetes Operator和自定义控制器，扩展平台能力\n3. 参与Serverless容器（如EKS弹性容器）的调度优化与冷启动加速\n4. 开发服务网格（Service Mesh）功能，包括流量管理、可观测性和安全策略\n5. 编写自动化运维工具，提升大规模集群的运维效率\n\n【任职要求】\n1. 本科及以上学历（含应届），计算机科学等相关专业\n2. 扎实的编程基础，熟悉Go语言或有意向深入学习，有后端开发课程项目经验\n3. 了解Kubernetes基本概念（Pod、Deployment、Service等），对云原生技术有浓厚兴趣\n4. 了解Docker容器基础，有容器化部署的课程项目或个人项目实践\n5. 了解分布式系统基本概念，对一致性协议（Raft等）有基础认知\n6. 有开源社区参与经历或技术博客者优先，学习能力强，有良好的自驱力',
             status='approved')
 
         # --- 能力模型 ---
@@ -247,6 +318,9 @@ async def init_db():
             ], weight_config=_w)
 
         await session.commit()
+
+    # 迁移：将旧版单阶段成长路径扩展为三阶段
+    await _migrate_single_phase_growth()
 
 
 async def _migrate_student_id_type(conn):

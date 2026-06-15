@@ -11,6 +11,7 @@ vi.mock('../../services/api', () => ({
   getStudent: vi.fn(),
   runStudentAgent: vi.fn(),
   runStudentAgentStream: vi.fn(),
+  getGrowthTasks: vi.fn().mockResolvedValue([]),
 }))
 
 // Mock 子组件

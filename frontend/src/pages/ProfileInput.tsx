@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Sparkles } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import { createStudent, updateStudent, listJobs, getHealthStatus, getStudentJobs, login, setAuthToken, parseResume, uploadResumeFile, getAuthToken } from '../services/api'
+import { createStudent, updateStudent, listJobs, getHealthStatus, getStudentJobs, login, setAuthToken, parseResume, uploadResumeFile, parseResumeStream, uploadResumeFileStream, getAuthToken } from '../services/api'
 import ThemeToggle from '../components/shared/ThemeToggle'
 import { toast } from '../utils/toast'
 
@@ -118,6 +118,7 @@ export default function ProfileInput() {
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [resumeText, setResumeText] = useState('')
   const [parseError, setParseError] = useState('')
+  const [parseProgress, setParseProgress] = useState<{ stage: string; progress: number; message: string }>({ stage: '', progress: 0, message: '' })
   const [error, setError] = useState('')
   const [systemJobs, setSystemJobs] = useState<any[]>([])
   const [entJobs, setEntJobs] = useState<any[]>([])
@@ -299,14 +300,31 @@ export default function ProfileInput() {
     setResumeFile(file)
   }
 
-  // AI 解析
+  // AI 解析（流式，带实时进度反馈；失败时降级到普通接口）
   const handleParse = async () => {
     if (!resumeText.trim() && !resumeFile) { setParseError('请先上传简历文件或粘贴简历内容'); return }
     setParseError('')
     setStep('parsing')
+    setParseProgress({ stage: 'start', progress: 0.05, message: resumeFile ? '正在准备文件...' : '正在准备解析...' })
+    const onProgress = (stage: string, progress: number, message: string) => {
+      setParseProgress({ stage, progress, message })
+    }
     try {
       let result
-      if (resumeFile) { result = await uploadResumeFile(resumeFile) } else { result = await parseResume(resumeText) }
+      // 优先走流式接口；若流式不可用（如旧环境/网络代理不支持 SSE），降级到普通接口
+      try {
+        if (resumeFile) {
+          result = await uploadResumeFileStream(resumeFile, onProgress)
+        } else {
+          result = await parseResumeStream(resumeText, onProgress)
+        }
+      } catch (streamErr: any) {
+        // 流式失败：若已拿到明确业务错误（如 503 AI 未就绪）则直接抛出；否则降级普通接口
+        if (streamErr?.message && /AI服务未就绪|未配置|不支持|过大|过于频繁/.test(streamErr.message)) {
+          throw streamErr
+        }
+        result = resumeFile ? await uploadResumeFile(resumeFile) : await parseResume(resumeText)
+      }
       applyParsedResult(result)
       setStep('form')
       setShowUploadModal(false)
@@ -769,22 +787,8 @@ export default function ProfileInput() {
     )
   }
 
-  // 解析动画
-  if (step === 'parsing') {
-    return (
-      <div className="profile-input-page">
-        <style>{PROFILE_CSS}</style>
-        <div className="parsing-overlay" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="parsing-card">
-            <div className="parsing-ring" />
-            <div className="parsing-title">AI 正在解析简历</div>
-            <div className="parsing-sub">{resumeFile ? `正在识别 ${resumeFile.name}` : '正在分析文本内容...'}</div>
-            <div className="parsing-dots"><div className="parsing-dot" /><div className="parsing-dot" /><div className="parsing-dot" /></div>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  // 解析进度通过弹窗内的进度面板展示（resume-parse-progress），
+  // 不再用全屏覆盖打断用户上下文。
 
   return (
     <div className="profile-input-page">
@@ -901,10 +905,43 @@ export default function ProfileInput() {
                 <textarea rows={6} placeholder="粘贴简历内容..." maxLength={10000} value={resumeText} onChange={e => setResumeText(e.target.value)} />
               </div>
               {parseError && <div className="error-alert">{parseError}</div>}
+
+              {/* 流式解析进度面板 */}
+              {step === 'parsing' && (
+                <div className="resume-parse-progress">
+                  <div className="parse-progress-header">
+                    <div className="parse-progress-spinner" />
+                    <span className="parse-progress-title">{parseProgress.message || 'AI 正在解析简历...'}</span>
+                  </div>
+                  <div className="parse-progress-bar-track">
+                    <div
+                      className="parse-progress-bar-fill"
+                      style={{ width: `${Math.max(5, Math.round(parseProgress.progress * 100))}%` }}
+                    />
+                  </div>
+                  <div className="parse-progress-meta">
+                    <span>{Math.round(parseProgress.progress * 100)}%</span>
+                    <span className="parse-progress-stage">
+                      {parseProgress.stage === 'extracting' ? '提取文本'
+                        : parseProgress.stage === 'analyzing' ? 'AI 分析'
+                        : parseProgress.stage === 'cache_hit' ? '命中缓存'
+                        : parseProgress.stage === 'done' ? '完成'
+                        : '处理中'}
+                    </span>
+                  </div>
+                  <p className="parse-progress-hint">
+                    {parseProgress.stage === 'cache_hit'
+                      ? '这份简历近期已解析过，正在秒级返回结果。'
+                      : '简历解析需要调用 AI，通常 3-8 秒，请勿关闭窗口。'}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => setShowUploadModal(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleParse} disabled={aiStatus === 'missing_key'}>AI 解析并填充</button>
+              <button className="btn btn-ghost" onClick={() => setShowUploadModal(false)} disabled={step === 'parsing'}>取消</button>
+              <button className="btn btn-primary" onClick={handleParse} disabled={aiStatus === 'missing_key' || step === 'parsing'}>
+                {step === 'parsing' ? '解析中...' : 'AI 解析并填充'}
+              </button>
             </div>
           </div>
         </div>
@@ -982,6 +1019,67 @@ const PROFILE_CSS = `
     min-height: 100vh;
     background: var(--bg-page);
     transition: background-color 0.3s;
+  }
+
+  /* ── 简历流式解析进度面板 ── */
+  .resume-parse-progress {
+    margin-top: var(--space-4);
+    padding: var(--space-4);
+    border-radius: 10px;
+    border: 1px solid var(--border-light);
+    background: var(--bg-hover);
+  }
+  .parse-progress-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .parse-progress-spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--border-light);
+    border-top-color: var(--accent-primary);
+    animation: parse-spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes parse-spin { to { transform: rotate(360deg); } }
+  .parse-progress-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: var(--font-display);
+  }
+  .parse-progress-bar-track {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border-light);
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .parse-progress-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent-primary);
+    transition: width 0.5s ease;
+  }
+  .parse-progress-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    margin-bottom: 6px;
+  }
+  .parse-progress-stage {
+    color: var(--accent-primary);
+  }
+  .parse-progress-hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    line-height: 1.5;
+    margin: 0;
   }
 
   /* ── Workspace Header ── */
@@ -1126,7 +1224,7 @@ const PROFILE_CSS = `
     color: var(--text-primary);
   }
   .sidebar-item.active {
-    background: rgba(0,113,227,0.08);
+    background: rgba(var(--accent-primary-rgb), 0.08);
     color: var(--accent-primary);
     font-weight: 600;
   }
@@ -1217,7 +1315,7 @@ const PROFILE_CSS = `
     font-size: 11px;
     font-weight: 500;
     color: var(--accent-danger);
-    background: rgba(255,59,48,0.08);
+    background: rgba(var(--accent-danger-rgb), 0.08);
     padding: 2px 8px;
     border-radius: 10px;
     margin-left: var(--space-2);
@@ -1276,7 +1374,7 @@ const PROFILE_CSS = `
     border-radius: 4px;
     transition: all 0.15s;
   }
-  .remove-btn:hover { color: var(--accent-danger); background: rgba(255,59,48,0.06); }
+  .remove-btn:hover { color: var(--accent-danger); background: rgba(var(--accent-danger-rgb), 0.06); }
   .add-more-btn {
     margin-top: var(--space-3);
     width: 100%;
@@ -1344,7 +1442,7 @@ const PROFILE_CSS = `
     background: var(--bg-card);
     color: var(--text-primary);
   }
-  .inline-input:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(0,113,227,0.1); }
+  .inline-input:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.1); }
   .add-skill-inline {
     display: flex;
     gap: var(--space-2);
@@ -1430,8 +1528,8 @@ const PROFILE_CSS = `
   .error-alert {
     padding: var(--space-3);
     border-radius: var(--radius-sm);
-    background: rgba(255,59,48,0.06);
-    border: 1px solid rgba(255,59,48,0.15);
+    background: rgba(var(--accent-danger-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-danger-rgb), 0.15);
     color: var(--accent-danger);
     font-size: var(--text-sm);
   }
@@ -1447,7 +1545,7 @@ const PROFILE_CSS = `
     margin-bottom: var(--space-4);
     transition: border-color 0.2s, background 0.2s;
   }
-  .upload-zone:hover { border-color: var(--accent-primary); background: rgba(0,113,227,0.03); }
+  .upload-zone:hover { border-color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.03); }
   .upload-zone.disabled { cursor: not-allowed; opacity: 0.6; }
   .upload-icon { font-size: 32px; margin-bottom: var(--space-2); color: var(--text-tertiary); }
   .upload-label { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-1); }
@@ -1455,8 +1553,8 @@ const PROFILE_CSS = `
   .ai-warning {
     padding: var(--space-3);
     border-radius: var(--radius-md);
-    background: rgba(255,59,48,0.06);
-    border: 1px solid rgba(255,59,48,0.15);
+    background: rgba(var(--accent-danger-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-danger-rgb), 0.15);
     color: var(--accent-danger);
     font-size: var(--text-sm);
     margin-bottom: var(--space-4);

@@ -2,7 +2,7 @@
 import ReactECharts from 'echarts-for-react'
 import { useAppStore } from '../../stores/appStore'
 
-const CHART_COLORS = ['#0071e3', '#34c759', '#ff9f0a', '#ff3b30', '#af52de', '#5ac8fa']
+const CHART_COLORS = ['var(--accent-primary)', 'var(--accent-success)', 'var(--accent-warning)', 'var(--accent-danger)', '#af52de', '#5ac8fa']
 
 const DIMENSION_LABELS: Record<string, string> = {
   tech_skills: '技术技能',

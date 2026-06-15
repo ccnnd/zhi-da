@@ -33,19 +33,19 @@ const SKILL_LABELS: Record<string, string> = {
 
 // Intent type color mapping
 const INTENT_COLORS: Record<string, { bg: string; text: string }> = {
-  diagnose: { bg: 'rgba(0,113,227,0.12)', text: '#0071e3' },
-  match: { bg: 'rgba(52,199,89,0.12)', text: '#34c759' },
+  diagnose: { bg: 'rgba(var(--accent-primary-rgb), 0.12)', text: 'var(--accent-primary)' },
+  match: { bg: 'rgba(var(--accent-success-rgb), 0.12)', text: 'var(--accent-success)' },
   plan: { bg: 'rgba(175,82,222,0.12)', text: '#af52de' },
-  review: { bg: 'rgba(255,149,0,0.12)', text: '#ff9500' },
+  review: { bg: 'rgba(var(--accent-warning-rgb), 0.12)', text: '#ff9500' },
   authorize: { bg: 'rgba(0,199,190,0.12)', text: '#00c7be' },
   question: { bg: 'rgba(99,99,99,0.10)', text: 'var(--text-secondary)' },
-  re_evaluate: { bg: 'rgba(255,59,48,0.10)', text: '#ff3b30' },
+  re_evaluate: { bg: 'rgba(var(--accent-danger-rgb), 0.10)', text: 'var(--accent-danger)' },
   profile_check: { bg: 'rgba(88,86,214,0.12)', text: '#5856d6' },
 }
 
 const FALLBACK_COLOR = '#ff9500'
 const RAIL_COLOR = 'var(--border-light)'
-const RAIL_FALLBACK_COLOR = 'rgba(255,149,0,0.5)'
+const RAIL_FALLBACK_COLOR = 'rgba(var(--accent-warning-rgb), 0.5)'
 
 function getIntentColor(intent: string) {
   if (!intent) return { bg: 'rgba(99,99,99,0.10)', text: 'var(--text-secondary)' }
@@ -57,9 +57,9 @@ function getIntentColor(intent: string) {
 }
 
 function getConfidenceInfo(c: number) {
-  if (c > 0.8) return { label: '高', color: '#34c759', bg: 'rgba(52,199,89,0.12)' }
-  if (c > 0.5) return { label: '中', color: '#ff9500', bg: 'rgba(255,149,0,0.12)' }
-  if (c > 0.3) return { label: '低', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' }
+  if (c > 0.8) return { label: '高', color: 'var(--accent-success)', bg: 'rgba(var(--accent-success-rgb), 0.12)' }
+  if (c > 0.5) return { label: '中', color: '#ff9500', bg: 'rgba(var(--accent-warning-rgb), 0.12)' }
+  if (c > 0.3) return { label: '低', color: '#ef4444', bg: 'rgba(var(--accent-danger-rgb), 0.12)' }
   return { label: '极低', color: 'var(--text-tertiary)', bg: 'rgba(120,120,120,0.08)' }
 }
 
@@ -175,8 +175,8 @@ const TraceTimeline: FC<Props> = ({ traces }) => {
               margin: idx > 0 ? '0 0 4px 0' : '0 0 4px 0',
               padding: '12px 16px',
               borderRadius: 10,
-              border: `1px solid ${isFallback ? 'rgba(255,149,0,0.25)' : 'var(--border-light)'}`,
-              background: isFallback ? 'rgba(255,149,0,0.03)' : 'var(--bg-card)',
+              border: `1px solid ${isFallback ? 'rgba(var(--accent-warning-rgb), 0.25)' : 'var(--border-light)'}`,
+              background: isFallback ? 'rgba(var(--accent-warning-rgb), 0.03)' : 'var(--bg-card)',
               minWidth: 0,
             }}>
               {/* Row 1: Intent badge + timestamp */}
@@ -206,7 +206,7 @@ const TraceTimeline: FC<Props> = ({ traces }) => {
                       borderRadius: 6,
                       fontSize: 10,
                       fontWeight: 600,
-                      background: 'rgba(255,149,0,0.12)',
+                      background: 'rgba(var(--accent-warning-rgb), 0.12)',
                       color: FALLBACK_COLOR,
                       lineHeight: '18px',
                     }}>
@@ -236,7 +236,7 @@ const TraceTimeline: FC<Props> = ({ traces }) => {
                 <span style={{
                   padding: '2px 8px',
                   borderRadius: 5,
-                  background: 'rgba(0,113,227,0.08)',
+                  background: 'rgba(var(--accent-primary-rgb), 0.08)',
                   color: 'var(--accent-primary)',
                   fontSize: 11,
                   fontWeight: 600,
@@ -324,7 +324,7 @@ const TraceTimeline: FC<Props> = ({ traces }) => {
                         borderRadius: 4,
                         fontSize: 10,
                         fontWeight: 500,
-                        background: 'rgba(239,68,68,0.06)',
+                        background: 'rgba(var(--accent-danger-rgb), 0.06)',
                         color: 'var(--text-tertiary)',
                         border: '1px dashed var(--border-light)',
                         lineHeight: '18px',

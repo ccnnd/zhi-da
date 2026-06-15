@@ -42,16 +42,19 @@ const ProfileTab: FC<Props> = ({ profile, changes, student }) => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{
-          flex: '0 0 auto',
+          flex: '1 1 360px',
+          minWidth: 320,
           background: 'var(--bg-card)',
           borderRadius: 12,
           border: '1px solid var(--border-light)',
           padding: 20,
         }}>
           {/* 雷达图区域 */}
-          <React.Suspense fallback={<div style={{ textAlign: 'center', padding: 40, color: 'var(--text-tertiary)', fontSize: 13 }}>加载图表中...</div>}>
-            <RadarChart data={radarData} />
-          </React.Suspense>
+          <div style={{ width: '100%', height: 360 }}>
+            <React.Suspense fallback={<div style={{ textAlign: 'center', padding: 40, color: 'var(--text-tertiary)', fontSize: 13 }}>加载图表中...</div>}>
+              <RadarChart data={radarData} />
+            </React.Suspense>
+          </div>
         </div>
 
         {/* 五维分值卡片网格 */}
@@ -59,8 +62,8 @@ const ProfileTab: FC<Props> = ({ profile, changes, student }) => {
           flex: 1,
           minWidth: 280,
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-          gap: 12,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+          gap: 16,
         }}>
           {dims.map(dim => {
             const dimData = profile[dim]
@@ -125,13 +128,13 @@ const ProfileTab: FC<Props> = ({ profile, changes, student }) => {
             {allSkills.map((skill, i) => {
               const opacity = 0.3 + (skill.score / 100) * 0.7
               const dimColorMap: Record<string, string> = {
-                tech_skills: '0,113,227',
-                project_exp: '0,113,227',
-                academic_foundation: '52,199,89',
-                domain_knowledge: '255,149,0',
-                soft_skill_evidence: '0,113,227',
+                tech_skills: 'var(--accent-primary-rgb)',
+                project_exp: 'var(--accent-primary-rgb)',
+                academic_foundation: 'var(--accent-success-rgb)',
+                domain_knowledge: 'var(--accent-warning-rgb)',
+                soft_skill_evidence: 'var(--accent-primary-rgb)',
               }
-              const rgb = dimColorMap[skill.dim] || '0,113,227'
+              const rgb = dimColorMap[skill.dim] || 'var(--accent-primary-rgb)'
               return (
                 <span
                   key={i}
@@ -182,7 +185,7 @@ const ProfileTab: FC<Props> = ({ profile, changes, student }) => {
                 fontSize: 12,
                 fontWeight: 600,
                 color: 'var(--accent-success)',
-                background: 'rgba(52,199,89,0.1)',
+                background: 'rgba(var(--accent-success-rgb), 0.1)',
                 padding: '2px 8px',
                 borderRadius: 10
               }}>
@@ -266,7 +269,7 @@ const ProfileTab: FC<Props> = ({ profile, changes, student }) => {
               const levelLabel = level === 'strong' ? '强' : level === 'medium' ? '中等' : '弱'
               const score = data?.normalized_score || 40
               const levelColor = level === 'strong' ? 'var(--accent-success)' : level === 'medium' ? 'var(--accent-warning)' : 'var(--accent-danger)'
-              const levelBg = level === 'strong' ? 'rgba(52,199,89,0.1)' : level === 'medium' ? 'rgba(255,149,0,0.1)' : 'rgba(255,59,48,0.1)'
+              const levelBg = level === 'strong' ? 'rgba(var(--accent-success-rgb), 0.1)' : level === 'medium' ? 'rgba(var(--accent-warning-rgb), 0.1)' : 'rgba(var(--accent-danger-rgb), 0.1)'
 
               return (
                 <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

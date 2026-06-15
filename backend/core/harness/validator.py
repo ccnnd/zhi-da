@@ -4,11 +4,35 @@ import re
 
 
 class SchemaValidator:
-    # 从 LLM 原始输出中提取 JSON
+    # 从 LLM 原始输出中提取首个完整 JSON 对象（括号配平，避免贪婪正则吞掉后续文本）
     @staticmethod
     def extract_json(text: str) -> str:
-        match = re.search(r'\{[\s\S]*\}', text)
-        return match.group(0) if match else text
+        start = text.find('{')
+        if start == -1:
+            return text
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+            else:
+                if ch == '"':
+                    in_string = True
+                elif ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        return text[start:i + 1]
+        # 未配平，回退到原始文本
+        return text
 
     # 将五维能力分值钳位到 0-100
     @staticmethod

@@ -59,9 +59,9 @@
   --radius-xs: 8px;
   --radius-sm: 12px;
   --radius-md: 16px;
-  --radius-lg: 22px;
-  --radius-xl: 28px;
-  --radius-2xl: 36px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-2xl: 40px;
 
 /* Typography —— 中文最小可读字号 12px 起步 */
   --text-xs: 12px;
@@ -242,7 +242,7 @@ body {
 .surface-card {
   background: var(--bg-card);
   border: 1px solid var(--border-card);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xs);
   padding: var(--space-6);
   transition: box-shadow 0.3s ease, transform 0.25s ease;
@@ -901,8 +901,8 @@ body.dark .badge-danger  { color: #ff453a; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  width: min(960px, 90vw);
-  max-height: 85vh;
+  width: min(1100px, 92vw);
+  max-height: 90vh;
 }
 
 .modal-header {
@@ -1006,27 +1006,32 @@ body.dark .badge-danger  { color: #ff453a; }
 /* Diagnosis Loading Animation */
 .diagnosis-loading {
   display: flex; flex-direction: column; align-items: center;
-  padding: 48px 24px; gap: 20px; animation: fadeIn 0.3s ease-out;
+  padding: 56px 32px 40px; gap: 24px; animation: fadeIn 0.3s ease-out;
+  max-width: 680px; margin: 40px auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
 }
 .diagnosis-bar {
-  width: 280px; height: 3px; border-radius: 2px;
+  width: 100%; max-width: 420px; height: 6px; border-radius: 3px;
   background: var(--border-light);
   overflow: hidden;
 }
 .diagnosis-bar-fill {
-  height: 100%; border-radius: 2px;
-  background: var(--accent-primary);
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-teal, var(--accent-primary)));
   transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .diagnosis-stage { text-align: center; }
 .diagnosis-stage-label {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  font-size: 15px; font-weight: 600; color: var(--text-primary);
-  font-family: var(--font-display); letter-spacing: 0.3px; min-height: 24px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-size: 18px; font-weight: 700; color: var(--text-primary);
+  font-family: var(--font-display); letter-spacing: 0.3px; min-height: 28px;
 }
 .diagnosis-stage-desc {
-  margin-top: 6px; font-size: 13px; color: var(--text-secondary);
-  font-family: var(--font-body); min-height: 20px;
+  margin-top: 8px; font-size: 13px; color: var(--text-secondary);
+  font-family: var(--font-body); min-height: 20px; line-height: 1.6;
 }
 .diagnosis-progress-text {
   font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono);
@@ -1311,7 +1316,7 @@ body.dark .login-message { color: #ffd60a; }
 
 .bento-topbar {
   height: 56px;
-  padding: 0 var(--space-8);
+  padding: 0 var(--space-4);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1385,10 +1390,13 @@ body.dark .login-message { color: #ffd60a; }
   display: flex;
   gap: 2px;
   padding: 4px;
-  margin: var(--space-4) var(--space-6) 0;
+  margin: var(--space-3) var(--space-4) 0;
   background: var(--bg-hover);
   border-radius: var(--radius-sm);
   border: none;
+  position: sticky;
+  top: 56px;
+  z-index: 99;
 }
 
 .bento-nav-tab {
@@ -1419,7 +1427,7 @@ body.dark .login-message { color: #ffd60a; }
 
 .bento-content {
   flex: 1;
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);

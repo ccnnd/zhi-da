@@ -132,6 +132,12 @@ async def update_enterprise_job(db: AsyncSession, ent_id: str, job_id: str, data
         new_status = data["status"]
         if new_status in ("draft", "pending_review"):
             job.status = new_status
+        # 已发布岗位可主动下线（approved → disabled），下线后可重新上线（disabled → approved）
+        # 这两种流转不经过审核，因为是企业自身的招聘状态管理
+        elif new_status == "disabled" and job.status == "approved":
+            job.status = "disabled"
+        elif new_status == "approved" and job.status == "disabled":
+            job.status = "approved"
         # 被驳回的岗位重新编辑后回到草稿态，清除旧的驳回原因
         if new_status == "draft" and job.review_reason:
             job.review_reason = ""

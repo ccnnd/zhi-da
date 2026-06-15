@@ -51,9 +51,9 @@ const STEP_LABELS: Record<string, string> = {
 }
 
 const confidenceLabel = (c: number): { text: string; color: string; bg: string } => {
-  if (c > 0.8) return { text: '高', color: 'var(--accent-success)', bg: 'rgba(52,199,89,0.12)' }
-  if (c > 0.5) return { text: '中', color: 'var(--accent-warning)', bg: 'rgba(255,149,0,0.12)' }
-  if (c > 0.3) return { text: '低', color: 'var(--accent-danger)', bg: 'rgba(239,68,68,0.12)' }
+  if (c > 0.8) return { text: '高', color: 'var(--accent-success)', bg: 'rgba(var(--accent-success-rgb), 0.12)' }
+  if (c > 0.5) return { text: '中', color: 'var(--accent-warning)', bg: 'rgba(var(--accent-warning-rgb), 0.12)' }
+  if (c > 0.3) return { text: '低', color: 'var(--accent-danger)', bg: 'rgba(var(--accent-danger-rgb), 0.12)' }
   return { text: '极低', color: 'var(--text-tertiary)', bg: 'rgba(120,120,120,0.08)' }
 }
 
@@ -142,8 +142,8 @@ const AIReasoningPanel: FC<Props> = ({ reasoning, nextActions, onNextAction }) =
               <span className="ai-panel-label">能力</span>
               <span style={{
                 fontSize: 11, padding: '2px 10px', borderRadius: 6,
-                background: 'rgba(0,113,227,0.06)', color: 'var(--accent-primary)',
-                border: '1px solid rgba(0,113,227,0.12)', fontWeight: 500,
+                background: 'rgba(var(--accent-primary-rgb), 0.06)', color: 'var(--accent-primary)',
+                border: '1px solid rgba(var(--accent-primary-rgb), 0.12)', fontWeight: 500,
               }}>
                 {skillLabel}
               </span>

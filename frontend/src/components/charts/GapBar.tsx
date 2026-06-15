@@ -32,8 +32,8 @@ export default function GapBar({ data }: GapBarProps) {
   const tooltipBorder = isDark ? '#1c1c1e' : '#e5e5ea'
   const tooltipText = isDark ? '#f5f5f7' : '#1d1d1f'
 
-  const greenColor = isDark ? '#30d158' : '#34c759' // accent-success
-  const roseColor = isDark ? '#ff453a' : '#ff3b30'   // accent-danger
+  const greenColor = isDark ? 'var(--accent-success)' : 'var(--accent-success)' // accent-success
+  const roseColor = isDark ? 'var(--accent-danger)' : 'var(--accent-danger)'   // accent-danger
   const grayColor = isDark ? '#636366' : '#aeaeb2'   // text-tertiary
 
   const skills = data.map((d) => d.skill).reverse()
@@ -118,9 +118,9 @@ export default function GapBar({ data }: GapBarProps) {
         data: requiredValues.map((v) => ({
           value: v,
           itemStyle: {
-            color: isDark ? 'rgba(10, 132, 255, 0.15)' : 'rgba(0, 113, 227, 0.15)',
+            color: isDark ? 'rgba(10, 132, 255, 0.15)' : 'rgba(var(--accent-primary-rgb), 0.15)',
             borderRadius: [0, 4, 4, 0],
-            borderColor: isDark ? '#0a84ff' : '#0071e3',
+            borderColor: isDark ? 'var(--accent-primary)' : 'var(--accent-primary)',
             borderWidth: 1,
           },
         })),
@@ -134,7 +134,7 @@ export default function GapBar({ data }: GapBarProps) {
         data: currentValues.map((v) => ({
           value: v,
           itemStyle: {
-            color: isDark ? '#0a84ff' : '#0071e3',
+            color: isDark ? 'var(--accent-primary)' : 'var(--accent-primary)',
             borderRadius: [0, 4, 4, 0],
           },
         })),
@@ -155,7 +155,7 @@ export default function GapBar({ data }: GapBarProps) {
             text,
             fill: color,
             fontSize: 11,
-            fontFamily: "var(--font-mono)",
+            fontFamily: 'Noto Sans SC, -apple-system, monospace',
             fontWeight: 'bold',
           },
           z: 10,

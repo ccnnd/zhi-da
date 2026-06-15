@@ -38,15 +38,42 @@ api.interceptors.request.use(config => {
   return config
 })
 
-// 响应拦截器：401 时自动跳转登录页
+// 响应拦截器：401 时自动跳转登录页；403 仅对账号级封禁做强退
 api.interceptors.response.use(
   response => response,
   error => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status
+    const detail: string = error.response?.data?.detail || ''
+    if (status === 401) {
       clearAuth()
       if (window.location.pathname !== '/') {
         window.location.href = '/'
       }
+    } else if (status === 403) {
+      // 仅当后端明确告知账号被封禁/审核未过时才做强退。
+      // 角色错配（"需要企业身份"）和资源级 403 不在此处理，交给组件自行处理。
+      const accountBannedPatterns = [
+        /已被禁用/,
+        /已被关闭/,
+        /已被停用/,
+        /尚未通过审核/,
+        /未通过审核/,
+      ]
+      const isAccountBanned = accountBannedPatterns.some(p => p.test(detail))
+      if (isAccountBanned) {
+        // 仅清除被封禁的身份，不影响其他角色
+        localStorage.removeItem('zhida_token')
+        localStorage.removeItem('zhida_role')
+        localStorage.removeItem('zhida_enterprise_id')
+        localStorage.removeItem('zhida_admin_account')
+        if (typeof window !== 'undefined') {
+          window.alert(detail || '账号不可用，请联系管理员')
+          if (window.location.pathname !== '/') {
+            window.location.replace('/')
+          }
+        }
+      }
+      // 非账号封禁的 403（如角色错配）：仅 reject，由组件自行处理
     }
     return Promise.reject(error)
   },
@@ -156,11 +183,102 @@ export async function uploadResumeFile(file: File) {
   return res.data
 }
 
+/**
+ * 简历解析进度回调类型。
+ * stage 取值：extracting(仅文件) / analyzing / cache_hit / done / error
+ */
+export type ResumeParseStage =
+  | 'extracting' | 'analyzing' | 'cache_hit' | 'done' | 'error'
+
+/** 通用 SSE 流式读取：从 Response 解析 `data: {...}` 行，分发进度/结果/错误。 */
+async function _consumeResumeStream(
+  response: Response,
+  onProgress?: (stage: string, progress: number, message: string) => void,
+): Promise<any> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('服务器未返回数据流')
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: any = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      let event: any
+      try {
+        event = JSON.parse(line.slice(6))
+      } catch {
+        continue
+      }
+      if (event.stage === 'result' && event.result) {
+        result = event.result
+      } else if (event.stage === 'error') {
+        throw new Error(event.message || '解析失败')
+      } else if (onProgress) {
+        onProgress(event.stage, event.progress ?? 0, event.message ?? '')
+      }
+    }
+  }
+  if (!result) throw new Error('解析未返回结果')
+  return result
+}
+
+/** 流式文本简历解析（实时进度反馈）。 */
+export async function parseResumeStream(
+  text: string,
+  onProgress?: (stage: string, progress: number, message: string) => void,
+): Promise<any> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getAuthToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const response = await fetch('/api/resume/parse-stream', {
+    method: 'POST', headers, body: JSON.stringify({ resume_text: text }),
+  })
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`
+    try { const e = await response.json(); if (e.detail) detail = e.detail } catch {}
+    throw new Error(detail)
+  }
+  return _consumeResumeStream(response, onProgress)
+}
+
+/** 流式文件简历解析（实时进度反馈，含文本提取阶段）。 */
+export async function uploadResumeFileStream(
+  file: File,
+  onProgress?: (stage: string, progress: number, message: string) => void,
+): Promise<any> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const headers: Record<string, string> = {}
+  const token = getAuthToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const response = await fetch('/api/resume/upload-stream', {
+    method: 'POST', headers, body: formData,
+  })
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`
+    try { const e = await response.json(); if (e.detail) detail = e.detail } catch {}
+    throw new Error(detail)
+  }
+  return _consumeResumeStream(response, onProgress)
+}
+
 // ==========================================
 // 1. 学生端扩展 API (Student Extension APIs)
 // ==========================================
 export async function getStudentJobs() {
   const res = await api.get('/student/jobs')
+  return res.data
+}
+
+/** 获取单个岗位详情（含企业信息 + 能力模型），供学生端展开岗位卡片 */
+export async function getStudentJobDetail(jobId: string) {
+  const res = await api.get(`/student/jobs/${jobId}`)
   return res.data
 }
 
@@ -217,7 +335,7 @@ export async function getEnterpriseJobDetail(jobId: string, enterpriseId: string
 }
 
 export async function updateEnterpriseJob(jobId: string, enterpriseId: string, data: {
-  title: string; category?: string; description?: string; requirements_text?: string; status?: string;
+  title?: string; category?: string; description?: string; requirements_text?: string; status?: string;
 }) {
   const res = await api.put(`/enterprise/jobs/${jobId}`, data, { params: { enterprise_id: enterpriseId } })
   return res.data

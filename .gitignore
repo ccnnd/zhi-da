@@ -29,8 +29,24 @@ backend/libs/
 *.tsbuildinfo
 
 *.pdf
+*.pptx
+*.tmp.pptx
+*.zip
+*.tar.gz
+*.doc
+*.docx
+*.mp4
+_build_*.txt
+_smoke_test.py
+_ppt_qa_images/
 
 artifacts/
 docs/reports/
 docs/superpowers/
 local-process-docs/
+backend/data/
+backend/_check_jobs_out.txt
+
+# Local competition/package deliverables
+润建专项赛*/
+润建赛相关附件/

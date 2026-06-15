@@ -5,15 +5,16 @@ import type { GrowthPhase } from '../../types'
 interface Props {
   phases: GrowthPhase[]
   currentPhase?: number
+  completedPhases?: boolean[]
 }
 
-const PathTimeline: FC<Props> = ({ phases, currentPhase = -1 }) => {
+const PathTimeline: FC<Props> = ({ phases, currentPhase = -1, completedPhases }) => {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '8px 0 24px', position: 'relative' }}>
       {phases.map((phase, i) => {
-        const isCompleted = i < currentPhase
-        const isCurrent = i === currentPhase
-        const isFuture = i > currentPhase
+        const isCompleted = completedPhases ? completedPhases[i] : i < currentPhase
+        const isCurrent = completedPhases ? (i === currentPhase && currentPhase >= 0) : i === currentPhase
+        const isFuture = !isCompleted && !isCurrent
 
         const nodeStyle: React.CSSProperties = {
           width: 24,
@@ -31,7 +32,7 @@ const PathTimeline: FC<Props> = ({ phases, currentPhase = -1 }) => {
           background: isCompleted
             ? 'var(--accent-success)'
             : isCurrent
-              ? 'rgba(0,113,227,0.2)'
+              ? 'rgba(var(--accent-primary-rgb), 0.2)'
               : 'transparent',
           color: isCompleted ? '#fafaf8' : isCurrent ? 'var(--accent-primary)' : 'var(--text-tertiary)',
           fontWeight: 700,
@@ -54,8 +55,10 @@ const PathTimeline: FC<Props> = ({ phases, currentPhase = -1 }) => {
                   right: '50%',
                   top: 11,
                   height: 2,
-                  background: isCompleted || (isCurrent && i <= currentPhase)
-                    ? 'linear-gradient(to right, var(--accent-success), var(--accent-primary))'
+                  background: (completedPhases?.[i - 1])
+                    ? (isCurrent
+                      ? 'linear-gradient(to right, var(--accent-success), var(--accent-primary))'
+                      : 'var(--accent-success)')
                     : 'var(--border-light)',
                   zIndex: 0,
                 }} />

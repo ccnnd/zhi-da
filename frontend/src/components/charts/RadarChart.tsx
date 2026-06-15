@@ -85,7 +85,7 @@ export default function RadarChart({ data, previousData }: RadarChartProps) {
       width: 2,
     },
     areaStyle: {
-      color: 'rgba(0, 113, 227, 0.3)',
+      color: 'rgba(var(--accent-primary-rgb), 0.3)',
     },
     itemStyle: {
       color: CHART_COLORS[0],

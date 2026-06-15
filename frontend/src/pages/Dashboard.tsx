@@ -393,9 +393,12 @@ export default function Dashboard() {
       const storedId = localStorage.getItem('student_id')
       if (storedId) {
         try {
-          // 先从后端恢复 student，再恢复历史诊断
-          const studentData = await getStudent(storedId)
-          setStudent(studentData)
+          // 如果 store 中已有学生数据（刚从 ProfileInput 提交过来），跳过重复拉取
+          const existingStudent = useAppStore.getState().student
+          if (!existingStudent || String(existingStudent.id) !== String(storedId)) {
+            const studentData = await getStudent(storedId)
+            setStudent(studentData)
+          }
 
           const history = await getDiagnosisHistory(storedId)
           if (history && history.length > 0) {
@@ -403,10 +406,18 @@ export default function Dashboard() {
             setDiagnosisResult(normalized[0])
             setDiagnosisHistory(normalized)
           }
-        } catch (e) {
-          console.warn('恢复会话失败，清除本地缓存:', e)
-          localStorage.removeItem('student_id')
-          localStorage.removeItem('student_data')
+        } catch (e: any) {
+          // 仅在认证失败（401/403）时清除会话，网络错误等不清除
+          const status = e?.response?.status
+          if (status === 401 || status === 403) {
+            console.warn('认证失败，清除本地缓存:', e)
+            localStorage.removeItem('student_id')
+            localStorage.removeItem('zhida_student_id')
+            localStorage.removeItem('student_data')
+            localStorage.removeItem('zhida_token')
+          } else {
+            console.warn('恢复会话失败（非认证错误，保留会话）:', e)
+          }
         }
       } else {
         hydrateFromStorage()
@@ -565,6 +576,18 @@ export default function Dashboard() {
 
       return (
         <div className="diagnosis-loading">
+          {/* AI 分析图标 */}
+          <div style={{
+            width: 64, height: 64, borderRadius: '50%',
+            background: 'linear-gradient(135deg, rgba(var(--accent-primary-rgb), 0.15), rgba(var(--accent-primary-rgb), 0.05))',
+            border: '2px solid rgba(var(--accent-primary-rgb), 0.3)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            animation: 'pulseGlow 2s ease-in-out infinite',
+          }}>
+            <Cpu size={28} style={{ color: 'var(--accent-primary)' }} />
+          </div>
+
+          {/* 阶段标题和描述 */}
           <div className="diagnosis-stage">
             <div className="diagnosis-stage-label">
               {meta?.icon}
@@ -575,16 +598,29 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="diagnosis-bar">
-            <div className="diagnosis-bar-fill" style={{ width: `${pct}%` }} />
+          {/* 进度条 + 百分比 */}
+          <div style={{ width: '100%', maxWidth: 420, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="diagnosis-bar" style={{ flex: 1 }}>
+              <div className="diagnosis-bar-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <span style={{
+              fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)',
+              color: pct >= 100 ? 'var(--accent-success)' : 'var(--accent-primary)',
+              minWidth: 40, textAlign: 'right',
+            }}>
+              {pct}%
+            </span>
           </div>
 
+          {/* 步骤指示器 */}
           <ProgressSteps steps={steps} />
 
+          {/* 进度文本 */}
           <div className="diagnosis-progress-text">
-            {progress.message || `${pct}% 完成`}
+            {progress.message || `已完成 ${doneCount} / ${steps.length} 个步骤`}
           </div>
 
+          {/* 取消按钮 */}
           {!diagnosisResult && (
             <button
               className="btn btn-ghost btn-sm"
@@ -595,7 +631,7 @@ export default function Dashboard() {
                 setDiagnosisError('')
                 toast.info('已取消自动诊断，你可以稍后手动发起')
               }}
-              style={{ marginTop: 8, fontSize: 12, color: 'var(--text-tertiary)' }}
+              style={{ marginTop: 4, fontSize: 12, color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)' }}
             >
               取消诊断
             </button>
@@ -910,7 +946,7 @@ export default function Dashboard() {
         onClick={() => setConversationOpen(true)}
         style={{
           position: 'fixed',
-          bottom: 24,
+          bottom: 72,
           right: 24,
           width: 52,
           height: 52,

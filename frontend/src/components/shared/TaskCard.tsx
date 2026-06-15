@@ -27,9 +27,9 @@ const statusConfig: Record<Props['status'], { icon: string; border: string; bg: 
   in_progress: {
     icon: '',
     border: 'var(--accent-primary)',
-    bg: 'rgba(0, 113, 227, 0.08)',
+    bg: 'rgba(var(--accent-primary-rgb), 0.08)',
     color: 'var(--accent-primary)',
-    iconBg: 'rgba(0, 113, 227, 0.2)',
+    iconBg: 'rgba(var(--accent-primary-rgb), 0.2)',
   },
 }
 
@@ -88,12 +88,12 @@ const TaskCard: FC<Props> = ({ task, status, onComplete, loading }) => {
                 style={{
                   fontSize: 11, color: 'var(--accent-primary)',
                   textDecoration: 'none', padding: '2px 8px',
-                  borderRadius: 4, background: 'rgba(0,113,227,0.08)',
-                  border: '1px solid rgba(0,113,227,0.2)',
+                  borderRadius: 4, background: 'rgba(var(--accent-primary-rgb), 0.08)',
+                  border: '1px solid rgba(var(--accent-primary-rgb), 0.2)',
                   transition: 'all 0.2s',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,113,227,0.16)'; e.currentTarget.style.borderColor = 'var(--accent-primary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,113,227,0.08)'; e.currentTarget.style.borderColor = 'rgba(0,113,227,0.2)' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(var(--accent-primary-rgb), 0.16)'; e.currentTarget.style.borderColor = 'var(--accent-primary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(var(--accent-primary-rgb), 0.08)'; e.currentTarget.style.borderColor = 'rgba(var(--accent-primary-rgb), 0.2)' }}
               >
                 {res.length > 40 ? res.slice(0, 40) + '...' : res}
               </a>
@@ -105,29 +105,38 @@ const TaskCard: FC<Props> = ({ task, status, onComplete, loading }) => {
         </div>
         {showButton && (
           <div style={{ marginTop: 10 }}>
-            <input
+            <textarea
               value={evidence}
               onChange={e => setEvidence(e.target.value)}
-              placeholder="完成证据（可选）"
+              placeholder="请描述你的完成过程、学习心得，或附上项目链接、代码提交记录等证据…"
+              rows={3}
               style={{
-                width: '100%', padding: '6px 12px', borderRadius: 6,
+                width: '100%', padding: '8px 12px', borderRadius: 6,
                 border: '1px solid var(--border-light)', fontSize: 12,
                 background: 'var(--bg-card)', color: 'var(--text-primary)',
-                marginBottom: 8, outline: 'none',
+                marginBottom: 8, outline: 'none', resize: 'vertical',
+                fontFamily: 'var(--font-body)', lineHeight: 1.5,
                 transition: 'border-color 0.2s, background-color 0.3s, color 0.3s',
               }}
               onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent-primary)')}
               onBlur={e => (e.currentTarget.style.borderColor = 'var(--border-light)')}
             />
             <button
-              onClick={() => onComplete(evidence)}
+              onClick={() => {
+                // 证据为空时二次确认（审核质量依赖证据）
+                if (!evidence.trim()) {
+                  const ok = window.confirm('未填写完成证据，AI 审核可能无法给出准确评价。确认直接提交？')
+                  if (!ok) return
+                }
+                onComplete(evidence)
+              }}
               disabled={loading}
               style={{
                 padding: '6px 18px',
                 borderRadius: 6,
                 border: `1px solid ${status === 'in_progress' ? 'var(--accent-primary)' : 'var(--accent-primary)'}`,
                 background: status === 'in_progress'
-                  ? 'rgba(0,113,227,0.15)'
+                  ? 'rgba(var(--accent-primary-rgb), 0.15)'
                   : 'transparent',
                 color: status === 'in_progress' ? 'var(--accent-primary)' : 'var(--accent-primary)',
                 cursor: loading ? 'not-allowed' : 'pointer',
@@ -138,10 +147,10 @@ const TaskCard: FC<Props> = ({ task, status, onComplete, loading }) => {
                 opacity: loading ? 0.6 : 1,
               }}
               onMouseEnter={e => {
-                if (!loading) { e.currentTarget.style.background = status === 'in_progress' ? 'rgba(0,113,227,0.25)' : 'rgba(0,113,227,0.15)'; e.currentTarget.style.transform = 'scale(1.03)' }
+                if (!loading) { e.currentTarget.style.background = status === 'in_progress' ? 'rgba(var(--accent-primary-rgb), 0.25)' : 'rgba(var(--accent-primary-rgb), 0.15)'; e.currentTarget.style.transform = 'scale(1.03)' }
               }}
               onMouseLeave={e => {
-                if (!loading) { e.currentTarget.style.background = status === 'in_progress' ? 'rgba(0,113,227,0.15)' : 'transparent'; e.currentTarget.style.transform = '' }
+                if (!loading) { e.currentTarget.style.background = status === 'in_progress' ? 'rgba(var(--accent-primary-rgb), 0.15)' : 'transparent'; e.currentTarget.style.transform = '' }
               }}
             >
               {loading ? '处理中...' : '标记完成'}

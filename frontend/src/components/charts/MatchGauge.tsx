@@ -36,9 +36,10 @@ export default function MatchGauge({ score, previousScore, label }: MatchGaugePr
   const anchorBorderColor = isDark ? '#16181d' : '#ffffff'
 
   // ECharts 渲染到 Canvas，必须使用实际颜色值而非 CSS 变量
-  const roseColor = resolveCssVar('--accent-danger', '#f472b6')
-  const amberColor = resolveCssVar('--accent-warning', '#fbbf24')
-  const greenColor = resolveCssVar('--accent-success', '#6ba87a')
+  // fallback 值与 index.css 中 --accent-* 变量的亮色模式值一致
+  const roseColor = resolveCssVar('--accent-danger', '#ff3b30')
+  const amberColor = resolveCssVar('--accent-warning', '#ff9f0a')
+  const greenColor = resolveCssVar('--accent-success', '#34c759')
 
   const percent = Math.round(score * 100)
   const delta = previousScore !== undefined ? Math.round((score - previousScore) * 100) : null
@@ -101,7 +102,7 @@ export default function MatchGauge({ score, previousScore, label }: MatchGaugePr
           color: textColor,
           distance: 30,
           fontSize: 11,
-          fontFamily: "var(--font-display)",
+          fontFamily: 'Noto Sans SC, -apple-system, sans-serif',
         },
         anchor: {
           show: true,
@@ -110,7 +111,7 @@ export default function MatchGauge({ score, previousScore, label }: MatchGaugePr
           itemStyle: {
             borderColor: anchorBorderColor,
             borderWidth: 3,
-            color: '#5b7bb5',
+            color: resolveCssVar('--accent-primary', '#0071e3'),
           },
         },
         title: {
@@ -121,7 +122,7 @@ export default function MatchGauge({ score, previousScore, label }: MatchGaugePr
           formatter: '{value}%',
           color: detailColor,
           fontSize: 32,
-          fontFamily: "var(--font-display)",
+          fontFamily: 'Noto Sans SC, -apple-system, sans-serif',
           fontWeight: 'bold',
           offsetCenter: [0, '50%'],
         },

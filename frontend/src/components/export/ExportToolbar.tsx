@@ -47,11 +47,18 @@ const ExportToolbar: FC<Props> = ({ studentId, diagnosisId, version }) => {
       if (token) headers['Authorization'] = `Bearer ${token}`
       const res = await fetch(url, { headers })
       if (!res.ok) throw new Error(`导出失败 (${res.status})`)
+      // 后端找不到诊断时返回 JSON {"error":...}，需拦截避免把错误当文件下载
+      const ctype = res.headers.get('content-type') || ''
+      if (ctype.includes('application/json')) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || '未找到诊断数据，无法导出')
+      }
       const blob = await res.blob()
       const blobUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = blobUrl
-      a.download = `职达_${studentId}.${fileExtensions[format]}`
+      const verTag = version ? `v${version}_` : ''
+      a.download = `职达_${verTag}${studentId}.${fileExtensions[format]}`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -70,8 +77,13 @@ const ExportToolbar: FC<Props> = ({ studentId, diagnosisId, version }) => {
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '12px 24px',
-      background: 'var(--bg-hover)',
+      background: 'var(--bg-elevated)',
       borderTop: '1px solid var(--border-light)',
+      position: 'sticky',
+      bottom: 0,
+      zIndex: 98,
+      backdropFilter: 'blur(var(--glass-blur, 12px))',
+      WebkitBackdropFilter: 'blur(var(--glass-blur, 12px))',
     }}>
       <div style={{ display: 'flex', gap: 10 }}>
         <button
@@ -81,7 +93,7 @@ const ExportToolbar: FC<Props> = ({ studentId, diagnosisId, version }) => {
           onMouseEnter={e => {
             e.currentTarget.style.borderColor = 'var(--accent-primary)'
             e.currentTarget.style.color = 'var(--accent-primary)'
-            e.currentTarget.style.boxShadow = '0 0 12px rgba(0,113,227,0.2)'
+            e.currentTarget.style.boxShadow = '0 0 12px rgba(var(--accent-primary-rgb), 0.2)'
           }}
           onMouseLeave={e => {
             e.currentTarget.style.borderColor = 'var(--border-light)'

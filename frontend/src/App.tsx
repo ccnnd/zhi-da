@@ -34,17 +34,19 @@ function PageLoading() {
 }
 
 function RequireStudent({ children }: { children: JSX.Element }) {
-  const { currentStudentId, student } = useAppStore()
+  const { currentStudentId, student, role } = useAppStore()
   const token = getAuthToken()
   const storedStudentId = currentStudentId || student?.id || localStorage.getItem('zhida_student_id') || localStorage.getItem('student_id')
-  return (token && storedStudentId) ? children : <Navigate to="/" replace />
+  const storedRole = role || localStorage.getItem('zhida_role')
+  return (token && storedStudentId && storedRole === 'student') ? children : <Navigate to="/" replace />
 }
 
 function RequireEnterprise({ children }: { children: JSX.Element }) {
-  const { currentEnterpriseId } = useAppStore()
+  const { currentEnterpriseId, role } = useAppStore()
   const token = getAuthToken()
   const storedEnterpriseId = currentEnterpriseId || localStorage.getItem('zhida_enterprise_id')
-  return (token && storedEnterpriseId) ? children : <Navigate to="/" replace />
+  const storedRole = role || localStorage.getItem('zhida_role')
+  return (token && storedEnterpriseId && storedRole === 'enterprise') ? children : <Navigate to="/" replace />
 }
 
 function RequireAdmin({ children }: { children: JSX.Element }) {

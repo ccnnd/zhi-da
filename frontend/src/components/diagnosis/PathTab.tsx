@@ -49,7 +49,6 @@ interface Props {
 }
 
 const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete, onReEvaluateComplete }) => {
-  const [activePhase, setActivePhase] = useState(0)
   const [completing, setCompleting] = useState<string | null>(null)
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set())
   const [taskError, setTaskError] = useState<string | null>(null)
@@ -173,6 +172,22 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
     growthTaskItems.forEach(t => map.set(t.task_name, t.status))
     return map
   }, [growthTaskItems])
+
+  // 计算各阶段完成状态和当前阶段（基于实际任务完成情况）
+  const completedPhases = useMemo(() => {
+    return phases.map(phase => {
+      if (!phase.tasks || phase.tasks.length === 0) return false
+      return phase.tasks.every(t => {
+        if (completedTasks.has(t.name)) return true
+        return taskNameToStatus.get(t.name) === 'completed'
+      })
+    })
+  }, [phases, completedTasks, taskNameToStatus])
+
+  const currentPhase = useMemo(() => {
+    const idx = completedPhases.findIndex(c => !c)
+    return idx === -1 ? -1 : idx
+  }, [completedPhases])
 
   // ===== 提交证据 + 自动审核（优先 Agent API，降级直接 API）=====
   const handleComplete = async (taskName: string, evidence: string = '') => {
@@ -312,12 +327,9 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
     )
   }
 
-  const currentPhaseData = phases[activePhase]
-  if (!currentPhaseData) return null
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <PathTimeline phases={phases} currentPhase={activePhase} />
+      <PathTimeline phases={phases} currentPhase={currentPhase} completedPhases={completedPhases} />
 
       {useGrowthTaskApi && (
         <div style={{
@@ -330,71 +342,94 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
               成长进度
             </span>
             <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
-              {growthTaskItems.filter(t => t.status === 'completed').length}/{growthTaskItems.length} 已完成
+              {completedPhases.filter(Boolean).length}/{phases.length} 阶段已完成
             </span>
           </div>
           <div style={{ height: 4, borderRadius: 2, background: 'var(--border-light)', overflow: 'hidden' }}>
             <div style={{
               height: '100%', borderRadius: 2,
-              background: growthTaskItems.filter(t => t.status === 'completed').length === growthTaskItems.length && growthTaskItems.length > 0
+              background: completedPhases.every(Boolean) && phases.length > 0
                 ? 'var(--accent-success)'
                 : 'var(--accent-primary)',
-              width: `${growthTaskItems.length > 0 ? (growthTaskItems.filter(t => t.status === 'completed').length / growthTaskItems.length) * 100 : 0}%`,
+              width: `${phases.length > 0 ? (completedPhases.filter(Boolean).length / phases.length) * 100 : 0}%`,
               transition: 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
             }} />
           </div>
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 16 }}>
-        {/* 阶段导航 */}
-        <div style={{
-          width: 140, flexShrink: 0,
-          display: 'flex', flexDirection: 'column', gap: 6,
-        }}>
-          {phases.map((phase, i) => (
-            <button
-              key={i}
-              onClick={() => setActivePhase(i)}
-              style={{
-                textAlign: 'left', padding: '10px 12px', borderRadius: 6,
-                border: '1px solid var(--border-light)',
-                background: i === activePhase ? 'var(--bg-hover)' : 'transparent',
-                color: i === activePhase ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                cursor: 'pointer', fontSize: 12,
-                fontWeight: i === activePhase ? 600 : 400,
-                fontFamily: 'var(--font-display)',
-                borderLeft: i === activePhase ? '3px solid var(--accent-primary)' : '3px solid transparent',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <div style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 10, marginBottom: 2 }}>
-                阶段 {i + 1}
+      {/* 所有阶段任务展示 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {phases.map((phase, pi) => {
+          const isPhaseCompleted = completedPhases[pi]
+          const isCurrent = pi === currentPhase
+          return (
+            <div key={pi}>
+              {/* 阶段标题 */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+                paddingBottom: 8, borderBottom: `1px solid ${isPhaseCompleted ? 'var(--accent-success)' : isCurrent ? 'var(--accent-primary)' : 'var(--border-light)'}`,
+              }}>
+                <span style={{
+                  width: 28, height: 28, borderRadius: '50%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)',
+                  background: isPhaseCompleted ? 'var(--accent-success)' : isCurrent ? 'rgba(var(--accent-primary-rgb), 0.15)' : 'transparent',
+                  border: isPhaseCompleted ? '2px solid var(--accent-success)' : isCurrent ? '2px solid var(--accent-primary)' : '2px solid var(--border-light)',
+                  color: isPhaseCompleted ? '#fff' : isCurrent ? 'var(--accent-primary)' : 'var(--text-tertiary)',
+                  flexShrink: 0,
+                }}>
+                  {isPhaseCompleted ? '✓' : pi + 1}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    fontSize: 14, fontWeight: 600,
+                    color: isPhaseCompleted ? 'var(--accent-success)' : isCurrent ? 'var(--accent-primary)' : 'var(--text-primary)',
+                    fontFamily: 'var(--font-display)',
+                  }}>
+                    阶段 {pi + 1}：{phase.goal}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                    {phase.weeks}周 · {(phase.tasks || []).length} 个任务
+                  </div>
+                </div>
+                {isPhaseCompleted && (
+                  <span style={{
+                    fontSize: 11, color: 'var(--accent-success)', fontFamily: 'var(--font-mono)',
+                    padding: '2px 10px', borderRadius: 10,
+                    background: 'rgba(var(--accent-success-rgb), 0.1)',
+                    border: '1px solid rgba(var(--accent-success-rgb), 0.3)',
+                  }}>已完成</span>
+                )}
+                {isCurrent && !isPhaseCompleted && (
+                  <span style={{
+                    fontSize: 11, color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)',
+                    padding: '2px 10px', borderRadius: 10,
+                    background: 'rgba(var(--accent-primary-rgb), 0.1)',
+                    border: '1px solid rgba(var(--accent-primary-rgb), 0.3)',
+                  }}>进行中</span>
+                )}
               </div>
-              <div>{phase.goal}</div>
-              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                {phase.weeks}周 · {phase.tasks.length}个任务
+              {/* 该阶段的任务卡片 */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 12 }}>
+                {(phase.tasks || []).map((task, ti) => {
+                  const taskId = task.name
+                  const status = getTaskStatus(task, ti)
+                  const isLoading = completing === taskId
+                  return (
+                    <TaskCard
+                      key={ti}
+                      task={task}
+                      status={status}
+                      onComplete={(evidence) => handleComplete(taskId, evidence)}
+                      loading={isLoading}
+                    />
+                  )
+                })}
               </div>
-            </button>
-          ))}
-        </div>
-        {/* 任务卡片列表 */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {(currentPhaseData.tasks || []).map((task, ti) => {
-            const taskId = task.name
-            const status = getTaskStatus(task, ti)
-            const isLoading = completing === taskId
-            return (
-              <TaskCard
-                key={ti}
-                task={task}
-                status={status}
-                onComplete={(evidence) => handleComplete(taskId, evidence)}
-                loading={isLoading}
-              />
-            )
-          })}
-        </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* ===== 审核结果面板 ===== */}

@@ -37,7 +37,7 @@ export default function NotFound() {
             transition: 'all 0.25s ease',
           }}
           onMouseEnter={e => {
-            e.currentTarget.style.boxShadow = '0 0 20px rgba(0,113,227,0.4)'
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(var(--accent-primary-rgb), 0.4)'
             e.currentTarget.style.transform = 'scale(1.03)'
           }}
           onMouseLeave={e => {

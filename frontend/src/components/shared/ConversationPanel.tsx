@@ -96,7 +96,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
         studentId,
         'ask',
         { message: trimmed },
-        (stage, _progress, message) => {
+        (stage, _progress, _message) => {
           if (stage === 'thinking') setStreamStatus('thinking')
           else if (stage === 'reasoning') setStreamStatus('reasoning')
           else if (stage === 'composing') setStreamStatus('composing')
@@ -104,7 +104,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
         },
       )
 
-      // 添加 AI 回复
+      // 用最终回复替换占位消息
       const aiMsg: ConversationMessage = {
         role: 'assistant',
         content: result.message || '',
@@ -202,7 +202,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
               height="18"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="var(--accent-primary, #0071e3)"
+              stroke="var(--accent-primary, var(--accent-primary))"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -272,7 +272,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
                   width: 28,
                   height: 28,
                   border: '3px solid var(--border-default, #e0e0e0)',
-                  borderTopColor: 'var(--accent-primary, #0071e3)',
+                  borderTopColor: 'var(--accent-primary, var(--accent-primary))',
                   borderRadius: '50%',
                   animation: 'conv-spin 0.8s linear infinite',
                 }}
@@ -376,7 +376,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
                     padding: isUser ? '10px 14px' : '12px 14px',
                     borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
                     background: isUser
-                      ? 'var(--accent-primary, #0071e3)'
+                      ? 'var(--accent-primary, var(--accent-primary))'
                       : 'var(--bg-hover, rgba(0,0,0,0.04))',
                     color: isUser
                       ? '#fff'
@@ -422,7 +422,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
                   width: 14,
                   height: 14,
                   border: '2px solid var(--border-default, #e0e0e0)',
-                  borderTopColor: 'var(--accent-primary, #0071e3)',
+                  borderTopColor: 'var(--accent-primary, var(--accent-primary))',
                   borderRadius: '50%',
                   animation: 'conv-spin 0.8s linear infinite',
                 }}
@@ -468,7 +468,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
               transition: 'border-color 0.2s',
             }}
             onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'var(--accent-primary, #0071e3)'
+              e.currentTarget.style.borderColor = 'var(--accent-primary, var(--accent-primary))'
             }}
             onBlur={(e) => {
               e.currentTarget.style.borderColor = 'var(--border-default, #e0e0e0)'
@@ -488,7 +488,7 @@ const ConversationPanel: FC<Props> = ({ studentId, open, onClose }) => {
               background:
                 !input.trim() || loading
                   ? 'var(--bg-hover, rgba(0,0,0,0.05))'
-                  : 'var(--accent-primary, #0071e3)',
+                  : 'var(--accent-primary, var(--accent-primary))',
               color:
                 !input.trim() || loading
                   ? 'var(--text-tertiary, #aeaeb2)'

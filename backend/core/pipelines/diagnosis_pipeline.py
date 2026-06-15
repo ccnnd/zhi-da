@@ -614,6 +614,75 @@ class PathStep(PipelineStep):
         ]
 
 
+# ---- 确定性推理依据生成（LLM 未返回 ai_reasoning 时使用）----
+def _build_deterministic_reasoning(state: PipelineState) -> dict:
+    """根据诊断数据（维度分数、匹配结果、置信度）生成确定性的 ai_reasoning。
+
+    返回结构：{维度/岗位名: {basis: str, confidence: float}}
+    前端 AIReasoning 组件可正确渲染。
+    """
+    reasoning = {}
+    profile = state.get("profile", {})
+    match_result = state.get("match_result", {})
+    dim_scores = match_result.get("dimension_scores", {})
+    top5 = match_result.get("top5_jobs", [])
+    confidence = state.get("confidence", {})
+    dim_confidences = confidence.get("dimensions", {})
+
+    # 1. 各维度能力分析
+    dim_labels = {
+        "tech": "技术技能", "tech_skills": "技术技能",
+        "project": "项目经验", "project_exp": "项目经验",
+        "academic": "学业基础", "academic_foundation": "学业基础",
+        "domain": "领域知识", "domain_knowledge": "领域知识",
+        "soft_evidence": "软技能", "soft_skill_evidence": "软技能",
+    }
+    for key, score in dim_scores.items():
+        label = dim_labels.get(key, key)
+        conf = dim_confidences.get(key, dim_confidences.get(
+            {"tech": "tech_skills", "project": "project_exp",
+             "academic": "academic_foundation", "domain": "domain_knowledge",
+             "soft_evidence": "soft_skill_evidence"}.get(key, key), 0.5))
+
+        if score >= 0.7:
+            basis = f"{label}得分 {score:.0%}，表现良好，是当前竞争力的核心优势"
+        elif score >= 0.4:
+            basis = f"{label}得分 {score:.0%}，有一定基础但仍有提升空间"
+        else:
+            basis = f"{label}得分 {score:.0%}，是当前短板，建议重点加强"
+        reasoning[label] = {"basis": basis, "confidence": round(conf, 2)}
+
+    # 2. 岗位匹配分析
+    if top5:
+        best = top5[0]
+        job_title = best.get("title", "目标岗位")
+        ms = best.get("match_score", 0)
+        matched = best.get("matched_skills", [])
+        missing = best.get("missing_skills", [])
+        job_basis = f"最匹配岗位为「{job_title}」(匹配度 {ms:.0%})"
+        if matched:
+            job_basis += f"，已具备 {', '.join(matched[:3])} 等技能"
+        if missing:
+            job_basis += f"，建议补充 {', '.join(missing[:3])}"
+        reasoning["岗位匹配"] = {"basis": job_basis, "confidence": 0.75}
+
+    # 3. 综合评估
+    overall_match = match_result.get("match_score", 0)
+    profile_conf = confidence.get("profile", 0.5)
+    if profile_conf < 0.6:
+        reasoning["综合评估"] = {
+            "basis": f"综合匹配度 {overall_match:.0%}，但画像置信度仅 {profile_conf:.0%}，建议补充更详细的简历信息以获得更精准的分析",
+            "confidence": profile_conf,
+        }
+    else:
+        reasoning["综合评估"] = {
+            "basis": f"综合匹配度 {overall_match:.0%}，画像置信度 {profile_conf:.0%}，分析结果较为可靠",
+            "confidence": profile_conf,
+        }
+
+    return reasoning
+
+
 # 职业建议生成步骤
 class AdviceStep(PipelineStep):
     def __init__(self, name="advice", depends_on=None):
@@ -627,12 +696,26 @@ class AdviceStep(PipelineStep):
                 f"请基于学生的能力画像和岗位匹配结果，生成职业发展建议和就业指导。\n"
                 f"当前画像置信度为 {profile_confidence}，如果置信度较低，请在建议中提醒学生补充更多信息。\n"
                 "输出严格JSON: {career_advice: 文本, recommended_directions: [方向], ai_reasoning: {每个建议的推理依据和置信度}}")
-        response = await llm.complete(messages, max_tokens=1500)
+        response = await llm.complete(messages, max_tokens=1500,
+                                      response_format={"type": "json_object"})
         data, error = SchemaValidator.validate_json_output(response.content)
         if data and not error:
             state.set("career_advice", data.get("career_advice", ""))
-            state.set("ai_reasoning", data.get("ai_reasoning", {}))
+            ai_reasoning = data.get("ai_reasoning") or {}
+            # 如果 LLM 未返回有效的 ai_reasoning，使用确定性推理兜底
+            if not ai_reasoning or not isinstance(ai_reasoning, dict):
+                logger.info("AdviceStep: LLM 未返回 ai_reasoning，使用确定性推理兜底")
+                ai_reasoning = _build_deterministic_reasoning(state)
+            else:
+                # 过滤掉元数据键，检查是否有真正的推理条目
+                meta_keys = {"_fallback", "_note", "fallback", "note"}
+                real_keys = [k for k in ai_reasoning if k not in meta_keys and ai_reasoning[k] is not None]
+                if not real_keys:
+                    logger.info("AdviceStep: LLM 返回的 ai_reasoning 仅有元数据，使用确定性推理兜底")
+                    ai_reasoning = _build_deterministic_reasoning(state)
+            state.set("ai_reasoning", ai_reasoning)
         else:
+            logger.warning("AdviceStep: LLM 输出解析失败 (error=%s)，使用确定性推理兜底", error)
             state.set("career_advice", "建议持续关注行业趋势，针对目标岗位持续提升核心技能。")
-            state.set("ai_reasoning", {"note": "基于能力画像的通用建议", "fallback": True})
+            state.set("ai_reasoning", _build_deterministic_reasoning(state))
         return state

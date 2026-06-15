@@ -121,8 +121,8 @@ export default function AdminDashboard() {
   const [rejectJobId, setRejectJobId] = useState('')
 
   // Load summary stats
-  const loadSummary = async () => {
-    setStatsLoading(true)
+  const loadSummary = async (silent?: boolean) => {
+    if (!silent) setStatsLoading(true)
     try {
       const data = await getAdminSummary()
       setSummary(data)
@@ -146,8 +146,8 @@ export default function AdminDashboard() {
   }
 
   // Load students list (paginated, with optional diagnosis filter)
-  const loadStudents = async (page = studentsPage, diagStatus = diagnosisStatus) => {
-    setStudentsLoading(true)
+  const loadStudents = async (page = studentsPage, diagStatus = diagnosisStatus, silent?: boolean) => {
+    if (!silent) setStudentsLoading(true)
     try {
       const data = await listAdminStudents(page, PAGE_SIZE, diagStatus || undefined)
       setStudents(data.items)
@@ -162,8 +162,8 @@ export default function AdminDashboard() {
   }
 
   // Load enterprises list (paginated)
-  const loadEnterprises = async (page = enterprisesPage) => {
-    setEnterprisesLoading(true)
+  const loadEnterprises = async (page = enterprisesPage, silent?: boolean) => {
+    if (!silent) setEnterprisesLoading(true)
     try {
       const data = await listAdminEnterprises(page, PAGE_SIZE)
       setEnterprises(data.items)
@@ -178,19 +178,21 @@ export default function AdminDashboard() {
   }
 
   // Load jobs audit list (paginated)
-  const loadJobs = async (filter?: string, page = jobsPage) => {
-    setJobsLoading(true)
+  const loadJobs = async (filter?: string, page = jobsPage, silent?: boolean) => {
+    if (!silent) setJobsLoading(true)
     try {
       const data = await listAdminJobs(filter || auditFilter, page, PAGE_SIZE)
       setJobs(data.items)
       setJobsTotal(data.total)
       setJobsTotalPages(data.total_pages)
       setJobsPage(data.page)
-      if (data.items.length > 0) {
-        handleSelectJob(data.items[0])
-      } else {
-        setSelectedJob(null)
-        setSelectedJobModel(null)
+      if (!silent) {
+        if (data.items.length > 0) {
+          handleSelectJob(data.items[0])
+        } else {
+          setSelectedJob(null)
+          setSelectedJobModel(null)
+        }
       }
     } catch (err) {
       console.error('Failed to load jobs', err)
@@ -210,6 +212,22 @@ export default function AdminDashboard() {
     } else if (activeTab === 'jobs') {
       loadJobs(auditFilter)
     }
+  }, [activeTab, auditFilter, studentsPage, enterprisesPage, jobsPage, diagnosisStatus])
+
+  // 定时轮询：每 10 秒静默刷新，实时同步企业端岗位变更和学生端数据
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (activeTab === 'stats') {
+        loadSummary(true)
+      } else if (activeTab === 'students') {
+        loadStudents(studentsPage, diagnosisStatus, true)
+      } else if (activeTab === 'enterprises') {
+        loadEnterprises(enterprisesPage, true)
+      } else if (activeTab === 'jobs') {
+        loadJobs(auditFilter, jobsPage, true)
+      }
+    }, 10000)
+    return () => clearInterval(interval)
   }, [activeTab, auditFilter, studentsPage, enterprisesPage, jobsPage, diagnosisStatus])
 
   // Student detail viewing
@@ -358,15 +376,15 @@ export default function AdminDashboard() {
           smooth: true,
           symbol: 'circle',
           symbolSize: 8,
-          lineStyle: { color: '#0071e3', width: 3 },
-          itemStyle: { color: '#0071e3' },
+          lineStyle: { color: 'var(--accent-primary)', width: 3 },
+          itemStyle: { color: 'var(--accent-primary)' },
           areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(0, 113, 227, 0.4)' },
-                { offset: 1, color: 'rgba(0, 113, 227, 0.01)' }
+                { offset: 0, color: 'rgba(var(--accent-primary-rgb), 0.4)' },
+                { offset: 1, color: 'rgba(var(--accent-primary-rgb), 0.01)' }
               ]
             }
           }
@@ -417,9 +435,9 @@ export default function AdminDashboard() {
             getVal(dimScores.soft_skill_evidence ?? dimScores.soft_evidence)
           ],
           name: '学生画像',
-          areaStyle: { color: 'rgba(0,113,227, 0.3)' },
-          lineStyle: { color: '#0071e3' },
-          itemStyle: { color: '#0071e3' }
+          areaStyle: { color: 'rgba(var(--accent-primary-rgb), 0.3)' },
+          lineStyle: { color: 'var(--accent-primary)' },
+          itemStyle: { color: 'var(--accent-primary)' }
         }]
       }]
     }
@@ -459,7 +477,7 @@ export default function AdminDashboard() {
           const item = Array.isArray(params) ? params[0] : params
           if (!item) return ''
           const sign = item.value > 0 ? '+' : ''
-          return `能力项: <b>${item.name}</b><br/>差距值: <b style="color:${item.value >= 0 ? '#34c759' : '#ff3b30'}">${sign}${item.value}</b>`
+          return `能力项: <b>${item.name}</b><br/>差距值: <b style="color:${item.value >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)'}">${sign}${item.value}</b>`
         }
       },
       grid: { left: '3%', right: '8%', bottom: '3%', top: '5%', containLabel: true },
@@ -492,7 +510,7 @@ export default function AdminDashboard() {
           return {
             value: val,
             itemStyle: {
-              color: val >= 0 ? '#34c759' : '#ff3b30',
+              color: val >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)',
               borderRadius: [0, 4, 4, 0]
             }
           }
@@ -841,7 +859,7 @@ export default function AdminDashboard() {
                               disabled={updatingEntId === ent.id}
                               style={isActive ? {} : { borderColor: 'var(--accent-success)', color: 'var(--accent-success)' }}
                             >
-                              {updatingEntId === ent.id ? '处理中...' : isActive ? '禁用企业' : '启用企业'}
+                              {updatingEntId === ent.id ? '处理中...' : isActive ? '禁用企业' : isPending ? '审核通过' : '重新启用'}
                             </button>
                           </td>
                         </tr>
@@ -872,7 +890,7 @@ export default function AdminDashboard() {
               padding: 0
             }}>
               <div style={{ padding: 12, borderBottom: '1px solid var(--border-light)', display: 'flex', gap: 6 }}>
-                {(['pending_review', 'approved'] as const).map(f => (
+                {(['pending_review', 'approved', 'rejected'] as const).map(f => (
                   <button
                     key={f}
                     onClick={() => { setAuditFilter(f); setJobsPage(1) }}
@@ -885,12 +903,15 @@ export default function AdminDashboard() {
                       borderRadius: 6,
                       cursor: 'pointer',
                       background: auditFilter === f ? 'var(--bg-hover)' : 'transparent',
-                      color: auditFilter === f ? 'var(--accent-warning)' : 'var(--text-secondary)',
+                      color: auditFilter === f
+                        ? (f === 'rejected' ? 'var(--accent-danger)' : f === 'approved' ? 'var(--accent-success)' : 'var(--accent-warning)')
+                        : 'var(--text-secondary)',
                       fontWeight: auditFilter === f ? 700 : 500,
                     }}
                   >
                     {f === 'pending_review' && '待审核'}
                     {f === 'approved' && '已通过'}
+                    {f === 'rejected' && '已驳回'}
                   </button>
                 ))}
               </div>
@@ -979,8 +1000,8 @@ export default function AdminDashboard() {
                       <div style={{
                         padding: '12px 16px',
                         borderRadius: 8,
-                        background: 'rgba(255,59,48,0.06)',
-                        border: '1px solid rgba(255,59,48,0.15)',
+                        background: 'rgba(var(--accent-danger-rgb), 0.06)',
+                        border: '1px solid rgba(var(--accent-danger-rgb), 0.15)',
                         color: 'var(--accent-danger)',
                         fontSize: 13
                       }}>
@@ -1233,9 +1254,9 @@ export default function AdminDashboard() {
                         padding: '10px 12px',
                         borderRadius: 8,
                         fontSize: 12,
-                        background: recommendResult.success ? 'rgba(52, 199, 89, 0.1)' : 'rgba(255, 59, 48, 0.1)',
-                        color: recommendResult.success ? '#34c759' : '#ff3b30',
-                        border: `1px solid ${recommendResult.success ? 'rgba(52, 199, 89, 0.3)' : 'rgba(255, 59, 48, 0.3)'}`,
+                        background: recommendResult.success ? 'rgba(var(--accent-success-rgb), 0.1)' : 'rgba(var(--accent-danger-rgb), 0.1)',
+                        color: recommendResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+                        border: `1px solid ${recommendResult.success ? 'rgba(var(--accent-success-rgb), 0.3)' : 'rgba(var(--accent-danger-rgb), 0.3)'}`,
                       }}>
                         {recommendResult.message}
                       </div>

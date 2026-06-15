@@ -65,6 +65,52 @@ async def get_student_jobs(
     return jobs
 
 
+# 1.1 获取单个岗位详情（含企业信息 + 能力模型），供学生端展开岗位卡片
+@router.get("/jobs/{job_id}")
+async def get_student_job_detail(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _identity: Identity = Depends(require_student),
+):
+    stmt = (
+        select(
+            JobPost.id, JobPost.title, JobPost.category, JobPost.description,
+            JobPost.requirements_text, JobPost.enterprise_id,
+            Enterprise.name.label("enterprise_name"),
+            Enterprise.industry.label("enterprise_industry"),
+            Enterprise.description.label("enterprise_description"),
+        )
+        .join(Enterprise, JobPost.enterprise_id == Enterprise.id)
+        .where(JobPost.id == job_id, JobPost.status == "approved", Enterprise.status == "active")
+    )
+    row = (await db.execute(stmt)).first()
+    if not row:
+        raise HTTPException(404, "岗位不存在或已下线")
+
+    # 能力模型（可选）
+    ability = await db.execute(select(JobAbilityModel).where(JobAbilityModel.job_post_id == job_id))
+    model = ability.scalar_one_or_none()
+    ability_model = None
+    if model:
+        ability_model = {
+            "tech_skills": model.tech_skills or {},
+            "soft_skills": model.soft_skills or {},
+            "domain_knowledge": model.domain_knowledge or {},
+            "project_exp": model.project_exp or [],
+            "weight_config": model.weight_config or {},
+        }
+
+    return {
+        "id": row.id, "title": row.title, "category": row.category,
+        "description": row.description, "requirements_text": row.requirements_text,
+        "enterprise_id": row.enterprise_id,
+        "enterprise_name": row.enterprise_name,
+        "enterprise_industry": row.enterprise_industry,
+        "enterprise_description": row.enterprise_description,
+        "ability_model": ability_model,
+    }
+
+
 # 2. 获取学生的授权记录列表
 @router.get("/authorizations")
 async def get_student_authorizations(

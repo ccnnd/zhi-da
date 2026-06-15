@@ -12,9 +12,9 @@ interface Props {
 
 const statusColors: Record<Step['status'], { bg: string; border: string; text: string }> = {
   wait: { bg: 'transparent', border: 'var(--text-tertiary)', text: 'var(--text-tertiary)' },
-  process: { bg: 'rgba(0,113,227,0.15)', border: 'var(--accent-primary)', text: 'var(--accent-primary)' },
+  process: { bg: 'rgba(var(--accent-primary-rgb), 0.15)', border: 'var(--accent-primary)', text: 'var(--accent-primary)' },
   finish: { bg: 'rgba(107,168,122,0.15)', border: 'var(--accent-success)', text: 'var(--accent-success)' },
-  error: { bg: 'rgba(255,59,48,0.15)', border: 'var(--accent-danger)', text: 'var(--accent-danger)' },
+  error: { bg: 'rgba(var(--accent-danger-rgb), 0.15)', border: 'var(--accent-danger)', text: 'var(--accent-danger)' },
 }
 
 const StatusIcon: FC<{ status: Step['status'] }> = ({ status }) => {
@@ -39,8 +39,8 @@ const ConnectLine: FC<{ status: Exclude<Step['status'], 'error'> }> = ({ status 
   const bg = status === 'finish' ? 'var(--accent-success)' : status === 'process' ? 'var(--accent-primary)' : 'var(--text-tertiary)'
   return (
     <div style={{
-      flex: 1, height: 2, minWidth: 24, margin: '0 4px',
-      background: bg, transition: 'background 0.4s ease',
+      flex: 1, height: 3, minWidth: 32, margin: '0 8px',
+      background: bg, borderRadius: 2, transition: 'background 0.4s ease',
     }} />
   )
 }
@@ -52,11 +52,11 @@ const ProgressSteps: FC<Props> = ({ steps }) => {
         const isLast = i === steps.length - 1
         return (
           <div key={i} style={{ display: 'flex', alignItems: 'flex-start', flex: isLast ? '0 0 auto' : 1 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, minWidth: 64 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, minWidth: 72 }}>
               <StatusIcon status={step.status} />
               <span style={{
-                fontSize: 12, color: step.status === 'wait' ? 'var(--text-tertiary)' : 'var(--text-secondary)',
-                textAlign: 'center', lineHeight: 1.4, fontFamily: 'var(--font-display)',
+                fontSize: 13, color: step.status === 'wait' ? 'var(--text-tertiary)' : 'var(--text-secondary)',
+                textAlign: 'center', lineHeight: 1.5, fontFamily: 'var(--font-display)',
                 fontWeight: step.status === 'process' ? 600 : 400,
               }}>
                 {step.label}
