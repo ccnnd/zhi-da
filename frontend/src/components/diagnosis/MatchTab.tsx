@@ -165,8 +165,7 @@ const MatchTab: FC<Props> = ({ matchScore, previousScore, dimensionScores, top5J
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 8, border: '1px solid var(--border-light)', background: 'var(--bg-card)' }}>
                   <span style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--bg-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{i + 1}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{job.title} {job.company && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>@{job.company}</span>}</div>
-                    {job.reason && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, lineHeight: 1.5 }}>{job.reason}</div>}
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>{job.title} {job.company && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>@{job.company}</span>}</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
                       {job.matched_skills?.map((s: string) => (
                         <span key={s} style={{ fontSize: 11, padding: '2px 7px', borderRadius: 4, background: 'rgba(var(--accent-success-rgb), 0.15)', color: 'var(--accent-success)' }}>{s}</span>
