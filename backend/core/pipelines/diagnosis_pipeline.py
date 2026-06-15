@@ -3,7 +3,11 @@ from core.harness.step import PipelineStep, PipelineState
 from core.harness.context import ContextBuilder
 from core.harness.validator import SchemaValidator
 from core.harness.llm import get_llm_client
+from sqlalchemy.ext.asyncio import AsyncSession
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ---- 维度名称映射（短名 -> 全名）----
@@ -16,6 +20,15 @@ DIM_KEY_MAP = {
 }
 DIM_KEY_MAP_REV = {v: k for k, v in DIM_KEY_MAP.items()}
 FULL_DIM_KEYS = list(DIM_KEY_MAP.values())
+
+# 维度中文标签（供 LLM 上下文与确定性匹配复用）
+DIM_CN_LABELS = {
+    "tech_skills": "技术技能",
+    "project_exp": "项目经验",
+    "academic_foundation": "学业基础",
+    "domain_knowledge": "领域知识",
+    "soft_skill_evidence": "软技能证据",
+}
 
 
 # ---- 确定性分数计算函数 ----
@@ -55,6 +68,101 @@ def _compute_match_score(dim_scores: dict, weights: dict) -> float:
         weight = weights.get(key, 0.2)
         total += score * weight
     return round(max(0.0, min(1.0, total)), 3)
+
+
+async def _load_matchable_jobs(db: AsyncSession | None) -> list[dict]:
+    """加载所有可用于匹配的岗位（含企业名 + 能力模型）。
+
+    返回结构：
+        [{
+            "job_id", "title", "category", "company", "enterprise_id",
+            "tech_skills": {skill: weight}, "domain_knowledge": {...}, ...
+        }, ...]
+
+    使用延迟导入 ContextLoader 以避免与 core.agent 包的循环依赖。
+    """
+    if db is None:
+        return []
+    try:
+        from core.agent.runtime import ContextLoader
+        active_jobs = await ContextLoader.get_active_jobs(db)
+    except Exception as exc:
+        logger.warning("加载可用岗位失败: %s", exc)
+        return []
+
+    matchable = []
+    for job in active_jobs:
+        job_id = job.get("id", "")
+        ability = await ContextLoader.get_job_ability_model(db, job_id) or {}
+        matchable.append({
+            "job_id": job_id,
+            "title": job.get("title", ""),
+            "category": job.get("category", ""),
+            "company": job.get("enterprise_name", ""),
+            "enterprise_id": job.get("enterprise_id", ""),
+            "tech_skills": ability.get("tech_skills", {}) or {},
+            "soft_skills": ability.get("soft_skills", {}) or {},
+            "domain_knowledge": ability.get("domain_knowledge", {}) or {},
+            "weight_config": ability.get("weight_config", {}) or {},
+        })
+    return matchable
+
+
+def _deterministic_top5(
+    dim_scores: dict,
+    profile: dict,
+    jobs: list[dict],
+    fallback_reason: str = "基于五维能力画像的确定性匹配",
+) -> list[dict]:
+    """LLM 不可用或返回岗位不真实时，用确定性加权计算每个岗位匹配分，取 TOP5。
+
+    匹配逻辑：
+      - 取岗位能力模型的 weight_config 作为维度权重（缺省均衡权重）；
+      - 用学生维度分数 × 岗位维度权重得到岗位综合分；
+      - 技能命中：学生 tech_skills sub_items 名称与岗位 tech_skills 键名交集；
+    """
+    scored = []
+    student_tech_names = set()
+    tech_dim = profile.get("tech_skills", {}) if isinstance(profile, dict) else {}
+    for item in (tech_dim.get("sub_items", []) if isinstance(tech_dim, dict) else []):
+        if isinstance(item, dict) and item.get("name"):
+            student_tech_names.add(str(item["name"]).lower())
+
+    for job in jobs:
+        weights = job.get("weight_config") or {}
+        if not isinstance(weights, dict) or not weights:
+            weights = {k: 0.2 for k in FULL_DIM_KEYS}
+        # 归一化权重
+        total_w = sum(float(weights.get(k, 0)) for k in FULL_DIM_KEYS) or 1.0
+        norm_weights = {k: float(weights.get(k, 0)) / total_w for k in FULL_DIM_KEYS}
+
+        score = 0.0
+        for k in FULL_DIM_KEYS:
+            score += dim_scores.get(k, 0.0) * norm_weights.get(k, 0.2)
+        score = max(0.0, min(1.0, round(score, 3)))
+
+        # 命中/缺失技能分析
+        job_tech = job.get("tech_skills", {}) or {}
+        if isinstance(job_tech, dict):
+            required_tech = [str(t) for t in job_tech.keys()]
+        else:
+            required_tech = []
+        matched = [t for t in required_tech if t.lower() in student_tech_names]
+        missing = [t for t in required_tech if t.lower() not in student_tech_names]
+
+        scored.append({
+            "job_id": str(job.get("job_id", "")),
+            "title": job.get("title", ""),
+            "match_score": score,
+            "company": job.get("company", ""),
+            "reason": fallback_reason,
+            "matched_skills": matched,
+            "missing_skills": missing,
+            "confidence": 0.7,
+        })
+
+    scored.sort(key=lambda j: j["match_score"], reverse=True)
+    return scored[:5]
 
 
 # ---- 解释结构构建 ----
@@ -249,11 +357,11 @@ class ProfileStep(PipelineStep):
 
 # 岗位匹配步骤（确定性计算 + LLM 解释）
 class MatchStep(PipelineStep):
-    def __init__(self, name="match", depends_on=None):
+    def __init__(self, name="match", depends_on=None, db: AsyncSession | None = None):
         super().__init__(name, depends_on)
+        self.db = db
 
     async def execute(self, state: PipelineState) -> PipelineState:
-        llm = get_llm_client()
         target_job = state.input.get("target_job", "")
         profile = state.get("profile", {})
 
@@ -277,42 +385,101 @@ class MatchStep(PipelineStep):
             short_key = DIM_KEY_MAP_REV.get(full_key, full_key)
             dim_scores_short[short_key] = score
 
-        # 5. 调用 LLM 生成岗位推荐、差距分析和解释文本
-        system_instructions = (
-            f"学生目标岗位是「{target_job}」。已计算出学生五维能力分数（0-1）：\n"
-            f"  tech_skills={dim_scores.get('tech_skills', 0):.2f}, "
-            f"project_exp={dim_scores.get('project_exp', 0):.2f}, "
-            f"academic_foundation={dim_scores.get('academic_foundation', 0):.2f}, "
-            f"domain_knowledge={dim_scores.get('domain_knowledge', 0):.2f}, "
-            f"soft_skill_evidence={dim_scores.get('soft_skill_evidence', 0):.2f}\n"
-            f"综合匹配分={match_score:.3f}（确定性计算结果）\n\n"
-            "请基于以上数据：\n"
-            "1. 推荐5个匹配的岗位（含匹配理由和缺失技能）\n"
-            "2. 分析每个维度的能力差距\n"
-            "3. 给出每个推荐岗位的推荐理由\n\n"
-            "请输出严格 JSON 格式：\n"
-            "{\n"
-            '  "top5_jobs": [\n'
-            '    { "job_id": "岗位ID", "title": "岗位名称", "match_score": 0-1浮点数, "company": "企业名称", "reason": "推荐理由", "matched_skills": ["匹配技能"], "missing_skills": ["缺失技能"] }\n'
-            "  ],\n"
-            '  "gap_details": [\n'
-            '    { "dimension": "tech_skills | project_exp | academic_foundation | domain_knowledge | soft_skill_evidence", "skill": "技能或能力名称", "current": 0-100之间的数字, "required": 0-100之间的数字, "gap": 差距数值 }\n'
-            "  ]\n"
-            "}"
+        # 5. 加载真实可用岗位（关键修复：把岗位数据喂给 LLM，避免空推荐）
+        matchable_jobs = await _load_matchable_jobs(self.db)
+        # 同时把岗位快照写入 state.extra（save_diagnosis 会落库到 job_snapshot）
+        state.extra["job_snapshot"] = matchable_jobs
+
+        # 确定性兜底：无论 LLM 是否可用，都先算出一份可信的 TOP5
+        deterministic_top5 = _deterministic_top5(
+            dim_scores, profile, matchable_jobs,
+            fallback_reason="基于五维能力画像与岗位权重计算的确定性匹配",
         )
 
-        messages = ContextBuilder.build_user_prompt(state, system_instructions)
-        response = await llm.complete(messages, max_tokens=2000)
-        data, error = SchemaValidator.validate_json_output(response.content)
+        # 6. 调用 LLM 生成岗位推荐、差距分析（把真实岗位列表注入上下文）
+        top5 = deterministic_top5  # 默认使用确定性结果
+        gap_details: list = []
+        llm_ok = False
+        job_id_set = {j["job_id"] for j in matchable_jobs}
+        job_lookup = {j["job_id"]: j for j in matchable_jobs}
 
-        if data and not error:
-            top5 = data.get("top5_jobs", [])
-            gap_details = data.get("gap_details", [])
+        if matchable_jobs:
+            job_list_text = "\n".join([
+                f"- job_id={j['job_id']} | {j['title']} @ {j['company']} | "
+                f"类别={j.get('category', '')} | 要求技能: {list(j.get('tech_skills', {}).keys()) or '未配置'}"
+                for j in matchable_jobs
+            ])
+            dim_text = ", ".join([f"{DIM_CN_LABELS[k]}={dim_scores.get(k, 0):.2f}" for k in FULL_DIM_KEYS])
+            system_instructions = (
+                f"学生目标方向是「{target_job}」。已计算出学生五维能力分数（0-1）：{dim_text}\n"
+                f"综合匹配分={match_score:.3f}（确定性计算结果）\n\n"
+                f"## 系统当前可用岗位（只能从这些岗位中推荐）:\n{job_list_text}\n\n"
+                "请基于以上数据：\n"
+                "1. **从上面列出的可用岗位中**推荐 5 个最匹配的岗位（必须使用上面真实的 job_id 和 title）\n"
+                "2. 为每个岗位分析匹配技能和缺失技能\n"
+                "3. 分析学生每个维度的能力差距\n\n"
+                "请输出严格 JSON 格式：\n"
+                "{\n"
+                '  "top5_jobs": [\n'
+                '    { "job_id": "必须使用上面列出的真实job_id", "title": "岗位名称", "match_score": 0-1浮点数, "company": "企业名称", "reason": "推荐理由", "matched_skills": ["匹配技能"], "missing_skills": ["缺失技能"] }\n'
+                "  ],\n"
+                '  "gap_details": [\n'
+                '    { "dimension": "tech_skills | project_exp | academic_foundation | domain_knowledge | soft_skill_evidence", "skill": "技能或能力名称", "current": 0-100之间的数字, "required": 0-100之间的数字, "gap": 差距数值 }\n'
+                "  ]\n"
+                "}"
+            )
+
+            try:
+                llm = get_llm_client()
+                messages = ContextBuilder.build_user_prompt(state, system_instructions)
+                response = await llm.complete(messages, max_tokens=2000)
+                data, error = SchemaValidator.validate_json_output(response.content)
+
+                if data and not error:
+                    raw_top5 = data.get("top5_jobs", []) or []
+                    # 确定性 per-job 分数锚点（job_id -> 确定性 match_score），用于校准 LLM 分数
+                    det_score_map = {j["job_id"]: j["match_score"] for j in deterministic_top5}
+                    # 校正：LLM 返回的岗位 job_id 必须在真实岗位列表中，且分数以确定性值为锚
+                    validated_top5 = []
+                    for job in raw_top5:
+                        if not isinstance(job, dict):
+                            continue
+                        jid = str(job.get("job_id", ""))
+                        real = job_lookup.get(jid)
+                        if not real:
+                            continue  # 丢弃编造的岗位
+                        try:
+                            llm_ms = float(job.get("match_score", 0))
+                        except (TypeError, ValueError):
+                            llm_ms = 0.0
+                        # 以确定性分数为锚：LLM 分数只允许在 ±0.1 内微调，超界用确定性值
+                        det_ms = det_score_map.get(jid, 0.0)
+                        if abs(llm_ms - det_ms) > 0.1:
+                            ms = det_ms
+                        else:
+                            ms = llm_ms
+                        validated_top5.append({
+                            "job_id": jid,
+                            "title": real["title"],  # 以真实岗位名为准
+                            "match_score": max(0.0, min(1.0, ms)),
+                            "company": real["company"],
+                            "reason": str(job.get("reason", "")),
+                            "matched_skills": list(job.get("matched_skills", []) or []),
+                            "missing_skills": list(job.get("missing_skills", []) or []),
+                            "confidence": 0.8,
+                        })
+                    if validated_top5:
+                        top5 = validated_top5
+                    gap_details = data.get("gap_details", []) or []
+                    llm_ok = True
+                else:
+                    logger.info("MatchStep LLM 输出解析失败，使用确定性匹配兜底")
+            except Exception as exc:
+                logger.warning("MatchStep LLM 调用失败，使用确定性匹配兜底: %s", exc)
         else:
-            top5 = []
-            gap_details = []
+            logger.info("无可用岗位，跳过 LLM 匹配，使用确定性空结果")
 
-        # 6. 组装结果
+        # 7. 组装结果
         result = {
             "match_score": match_score,
             "dimension_scores": dim_scores_short,
@@ -321,14 +488,14 @@ class MatchStep(PipelineStep):
         }
         state.set("match_result", result)
 
-        # 7. 构建并保存解释结构
+        # 8. 构建并保存解释结构
         explanations = _build_explanations(state, dim_scores, confidences, match_score, weights)
         state.set("explanations", explanations)
 
-        # 8. 保存置信度
+        # 9. 保存置信度
         state.set("confidence", {
             "profile": round(sum(confidences.values()) / max(len(confidences), 1), 2),
-            "match": 0.85 if (data and not error) else 0.5,
+            "match": 0.85 if llm_ok else 0.6,
             "dimensions": confidences,
         })
 
@@ -336,21 +503,34 @@ class MatchStep(PipelineStep):
 
 
 def _get_weights_for_target(target_job: str) -> dict:
-    """根据目标岗位方向确定权重配置"""
+    """根据目标岗位方向确定权重配置。
+
+    优化：合并相同权重的分支（后端/前端/移动端）、补齐常见方向
+    （算法含 NLP/CV/推荐/大模型、测试/QA、运维/DevOps、安全、嵌入式）、
+    修复"数据"误匹配"database"的问题（改用独立词匹配）。
+    """
     target = (target_job or "").lower()
-    if any(k in target for k in ["算法", "机器学习", "深度学习", "ai"]):
+    # 算法/AI 方向（含 NLP/CV/推荐/大模型）
+    if any(k in target for k in ["算法", "机器学习", "深度学习", "ai", "nlp", "cv", "推荐", "大模型", "llm", "数据挖掘"]):
         return {"tech_skills": 0.20, "project_exp": 0.15, "academic_foundation": 0.35, "domain_knowledge": 0.15, "soft_skill_evidence": 0.15}
-    elif any(k in target for k in ["后端", "java", "python", "go"]):
+    # 开发方向（后端/前端/移动端/游戏，权重相同）
+    if any(k in target for k in ["后端", "前端", "移动", "android", "ios", "游戏", "客户端", "服务端",
+                                  "java", "python", "go", "c++", "react", "vue", "web", "node"]):
         return {"tech_skills": 0.35, "project_exp": 0.30, "academic_foundation": 0.10, "domain_knowledge": 0.10, "soft_skill_evidence": 0.15}
-    elif any(k in target for k in ["前端", "react", "vue", "web"]):
-        return {"tech_skills": 0.35, "project_exp": 0.30, "academic_foundation": 0.10, "domain_knowledge": 0.10, "soft_skill_evidence": 0.15}
-    elif any(k in target for k in ["产品", "pm", "product"]):
+    # 产品方向
+    if any(k in target for k in ["产品", "pm", "product", "运营"]):
         return {"tech_skills": 0.10, "project_exp": 0.15, "academic_foundation": 0.10, "domain_knowledge": 0.30, "soft_skill_evidence": 0.35}
-    elif any(k in target for k in ["数据", "分析", "data"]):
+    # 数据方向（用独立词匹配避免 "database" 误匹配）
+    if any(k in target for k in ["数据分析", "数据工程", "数据科学", "bi", "etl", "数仓", "统计"]):
         return {"tech_skills": 0.20, "project_exp": 0.25, "academic_foundation": 0.30, "domain_knowledge": 0.10, "soft_skill_evidence": 0.15}
-    else:
-        # 默认均衡权重
-        return {"tech_skills": 0.25, "project_exp": 0.25, "academic_foundation": 0.15, "domain_knowledge": 0.15, "soft_skill_evidence": 0.20}
+    # 测试/QA
+    if any(k in target for k in ["测试", "qa", "quality", "自动化测试"]):
+        return {"tech_skills": 0.30, "project_exp": 0.25, "academic_foundation": 0.10, "domain_knowledge": 0.15, "soft_skill_evidence": 0.20}
+    # 运维/DevOps/SRE
+    if any(k in target for k in ["运维", "devops", "sre", "基础设施", "云原生"]):
+        return {"tech_skills": 0.35, "project_exp": 0.25, "academic_foundation": 0.10, "domain_knowledge": 0.15, "soft_skill_evidence": 0.15}
+    # 默认均衡权重
+    return {"tech_skills": 0.25, "project_exp": 0.25, "academic_foundation": 0.15, "domain_knowledge": 0.15, "soft_skill_evidence": 0.20}
 
 
 # 差距分析步骤
@@ -375,19 +555,63 @@ class PathStep(PipelineStep):
         gaps = state.get("gap_analysis", {}).get("gaps", [])
         # 将差距分析与维度全名一起传给 LLM
         messages = ContextBuilder.build_user_prompt(state,
-                "请基于差距分析结果，生成个性化成长路径。每个任务需要明确标注：\n"
+                "请基于差距分析结果，生成个性化成长路径。必须包含恰好3个阶段（不多不少），由浅入深递进：\n"
+                "- 阶段1（夯实基础，2-3周）：针对最薄弱的技能进行专项练习\n"
+                "- 阶段2（能力进阶，3-4周）：通过项目实践深化核心能力\n"
+                "- 阶段3（综合提升，2-3周）：模拟真实场景，全面提升竞争力\n\n"
+                "每个任务需要明确标注：\n"
                 "1. linked_gap: 该任务弥补的具体差距\n"
                 "2. target_dimension: 目标提升的维度（使用全称：tech_skills/project_exp/academic_foundation/domain_knowledge/soft_skill_evidence）\n"
                 "3. expected_impact: 预期对各维度的提升幅度（0-1之间小数）\n\n"
-                "输出严格JSON: {phases: [{goal, weeks: 数字, tasks: [{name, description, resources: [链接], criteria, linked_gap, target_dimension, expected_impact: {维度名: 提升值}}]}]}，包含2-3个阶段。",
+                "输出严格JSON: {phases: [{goal, weeks: 数字, tasks: [{name, description, resources: [链接], criteria, linked_gap, target_dimension, expected_impact: {维度名: 提升值}}]}]}。",
                 f"差距: {json.dumps(gaps, ensure_ascii=False)}")
         response = await llm.complete(messages, max_tokens=2000)
         data, error = SchemaValidator.validate_json_output(response.content)
         if data and not error:
+            # 确保至少有 2 个阶段
+            phases = data.get("phases", [])
+            if len(phases) < 2:
+                data["phases"] = self._expand_to_multi_phase(phases)
             state.set("growth_path", data)
         else:
-            state.set("growth_path", {"phases": [{"goal": "基础能力提升", "weeks": 4, "tasks": [{"name": "夯实基础", "description": "针对薄弱技能进行专项练习", "resources": [], "criteria": "技能评分达到70+", "linked_gap": "综合能力提升", "target_dimension": "tech_skills", "expected_impact": {"tech_skills": 0.05}}]}]})
+            state.set("growth_path", {"phases": [
+                {"goal": "夯实基础", "weeks": 3, "tasks": [
+                    {"name": "核心技能专项训练", "description": "针对最薄弱的技能进行专项练习，打牢基础", "resources": [], "criteria": "技能评分达到65+", "linked_gap": "基础能力不足", "target_dimension": "tech_skills", "expected_impact": {"tech_skills": 0.05}}
+                ]},
+                {"goal": "项目实践", "weeks": 4, "tasks": [
+                    {"name": "实战项目开发", "description": "通过完整项目实践，将理论知识转化为实际能力", "resources": [], "criteria": "完成至少1个完整项目", "linked_gap": "缺乏项目经验", "target_dimension": "project_exp", "expected_impact": {"project_exp": 0.08}}
+                ]},
+                {"goal": "综合提升", "weeks": 3, "tasks": [
+                    {"name": "模拟面试与复盘", "description": "通过模拟面试查漏补缺，全面提升竞争力", "resources": [], "criteria": "模拟面试通过率80%+", "linked_gap": "综合竞争力", "target_dimension": "soft_skill_evidence", "expected_impact": {"soft_skill_evidence": 0.05}}
+                ]},
+            ]})
         return state
+
+    @staticmethod
+    def _expand_to_multi_phase(existing_phases: list) -> list:
+        """当 LLM 只返回 1 个阶段时，自动补充后续阶段。"""
+        if not existing_phases:
+            return [
+                {"goal": "夯实基础", "weeks": 3, "tasks": [
+                    {"name": "核心技能专项训练", "description": "针对薄弱技能进行专项练习", "resources": [], "criteria": "技能评分达到65+", "linked_gap": "基础能力", "target_dimension": "tech_skills", "expected_impact": {"tech_skills": 0.05}}
+                ]},
+                {"goal": "能力进阶", "weeks": 4, "tasks": [
+                    {"name": "项目实战", "description": "通过项目实践深化能力", "resources": [], "criteria": "完成1个完整项目", "linked_gap": "项目经验", "target_dimension": "project_exp", "expected_impact": {"project_exp": 0.08}}
+                ]},
+                {"goal": "综合提升", "weeks": 3, "tasks": [
+                    {"name": "综合演练与复盘", "description": "模拟真实场景，全面提升竞争力", "resources": [], "criteria": "综合评分提升10%", "linked_gap": "综合能力", "target_dimension": "soft_skill_evidence", "expected_impact": {"soft_skill_evidence": 0.05}}
+                ]},
+            ]
+        phase1 = existing_phases[0]
+        return [
+            phase1,
+            {"goal": "能力进阶", "weeks": 4, "tasks": [
+                {"name": "项目实战深化", "description": "在基础之上通过项目实践深化核心能力", "resources": [], "criteria": "完成至少1个完整项目", "linked_gap": "项目经验不足", "target_dimension": "project_exp", "expected_impact": {"project_exp": 0.08}}
+            ]},
+            {"goal": "综合提升", "weeks": 3, "tasks": [
+                {"name": "模拟面试与复盘", "description": "通过模拟面试和复盘全面提升竞争力", "resources": [], "criteria": "模拟面试通过率80%+", "linked_gap": "综合竞争力", "target_dimension": "soft_skill_evidence", "expected_impact": {"soft_skill_evidence": 0.05}}
+            ]},
+        ]
 
 
 # 职业建议生成步骤

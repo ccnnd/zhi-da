@@ -68,11 +68,13 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
   const [growthTaskItems, setGrowthTaskItems] = useState<GrowthTaskItem[]>([])
   const [useGrowthTaskApi, setUseGrowthTaskApi] = useState(false)
   const [loadingTasks, setLoadingTasks] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
   // 加载成长任务：优先 Agent API，降级 GrowthTask API，再降级 growth_path JSON
-  useEffect(() => {
+  const loadTasks = () => {
     if (!studentId) return
     setLoadingTasks(true)
+    setLoadError(false)
     // 优先通过 Agent API 加载
     runStudentAgent(studentId, 'continue_growth')
       .then((result) => {
@@ -114,12 +116,19 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
             setUseGrowthTaskApi(false)
           }
         }).catch(() => {
+          // 两个 API 都失败：标记错误而非静默降级到空 JSON
           setUseGrowthTaskApi(false)
+          setLoadError(true)
         })
       })
       .finally(() => {
         setLoadingTasks(false)
       })
+  }
+
+  useEffect(() => {
+    loadTasks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentId, diagnosisId])
 
   // 构造 phases 数据
@@ -131,11 +140,13 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
         phaseMap.get(t.phase_index)!.push(t)
       })
       const sortedKeys = Array.from(phaseMap.keys()).sort((a, b) => a - b)
+      const gpPhases = growthPath?.phases ?? []
       return sortedKeys.map((phaseIdx) => {
         const items = phaseMap.get(phaseIdx)!.sort((a, b) => a.task_index - b.task_index)
+        const gpPhase = gpPhases[phaseIdx]
         return {
-          goal: `阶段 ${phaseIdx + 1}`,
-          weeks: 4,
+          goal: gpPhase?.goal ?? `阶段 ${phaseIdx + 1}`,
+          weeks: gpPhase?.weeks ?? 4,
           tasks: items.map(t => ({
             name: t.task_name,
             description: t.task_description,
@@ -196,13 +207,19 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
         setReviewResult(review)
         setReviewTaskId(taskId)
 
+        // 关键修复：无论通过与否，都同步更新本地任务状态，
+        // 让卡片视觉与后端一致（通过→completed，未通过→in_progress 可重新提交）
+        setGrowthTaskItems(prev => prev.map(t =>
+          t.id === taskId ? { ...t, status, submitted_evidence: evidence || t.submitted_evidence } : t
+        ))
+
         if (review.preliminary_approved) {
           setCompletedTasks(prev => new Set([...prev, taskName]))
           onTaskComplete(taskName)
           // 弹出复评确认
           setReEvalConfirm({ taskId, taskName })
         }
-        // 如果未通过，保持 in_progress，用户可重新提交
+        // 如果未通过，状态已是 in_progress，用户可在该任务卡片重新提交证据
       } else {
         // Legacy: 旧流程不再支持，提示用户先完成诊断
         setTaskError('请先完成诊断以启用成长任务追踪。')
@@ -275,6 +292,16 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
     )
   }
 
+  // 加载失败：显示错误 + 重试，而非静默降级到空状态
+  if (loadError) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <EmptyState icon="⚠️" title="成长任务加载失败" description="网络异常或服务暂时不可用，请重试" />
+        <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={loadTasks}>重新加载</button>
+      </div>
+    )
+  }
+
   if (phases.length === 0) {
     return (
       <EmptyState
@@ -294,13 +321,28 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
 
       {useGrowthTaskApi && (
         <div style={{
-          padding: '8px 14px', borderRadius: 6,
-          background: 'rgba(0,113,227,0.06)',
-          border: '1px solid rgba(0,113,227,0.15)',
-          fontSize: 12, color: 'var(--text-secondary)',
-          fontFamily: 'var(--font-mono)',
+          padding: '10px 14px', borderRadius: 8,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-light)',
         }}>
-          已启用成长任务追踪（{growthTaskItems.length} 个任务，{growthTaskItems.filter(t => t.status === 'completed').length} 个已完成）
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-display)', fontWeight: 500 }}>
+              成长进度
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
+              {growthTaskItems.filter(t => t.status === 'completed').length}/{growthTaskItems.length} 已完成
+            </span>
+          </div>
+          <div style={{ height: 4, borderRadius: 2, background: 'var(--border-light)', overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 2,
+              background: growthTaskItems.filter(t => t.status === 'completed').length === growthTaskItems.length && growthTaskItems.length > 0
+                ? 'var(--accent-success)'
+                : 'var(--accent-primary)',
+              width: `${growthTaskItems.length > 0 ? (growthTaskItems.filter(t => t.status === 'completed').length / growthTaskItems.length) * 100 : 0}%`,
+              transition: 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+            }} />
+          </div>
         </div>
       )}
 
@@ -359,8 +401,8 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
       {reviewResult && (
         <div style={{
           padding: 16, borderRadius: 10,
-          border: `1px solid ${reviewResult.preliminary_approved ? 'rgba(52,199,89,0.4)' : 'rgba(255,59,48,0.3)'}`,
-          background: reviewResult.preliminary_approved ? 'rgba(52,199,89,0.06)' : 'rgba(255,59,48,0.04)',
+          border: `1px solid ${reviewResult.preliminary_approved ? 'rgba(var(--accent-success-rgb), 0.4)' : 'rgba(var(--accent-danger-rgb), 0.3)'}`,
+          background: reviewResult.preliminary_approved ? 'rgba(var(--accent-success-rgb), 0.06)' : 'rgba(var(--accent-danger-rgb), 0.04)',
           animation: 'slideUp 0.25s ease-out',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -393,8 +435,8 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
       {reEvalConfirm && !reEvalRunning && (
         <div style={{
           padding: 16, borderRadius: 10,
-          border: '1px solid rgba(0,113,227,0.3)',
-          background: 'rgba(0,113,227,0.06)',
+          border: '1px solid rgba(var(--accent-primary-rgb), 0.3)',
+          background: 'rgba(var(--accent-primary-rgb), 0.06)',
           animation: 'slideUp 0.25s ease-out',
         }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, fontFamily: 'var(--font-display)' }}>
@@ -409,13 +451,13 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
               style={{
                 padding: '8px 20px', borderRadius: 6,
                 border: '1px solid var(--accent-primary)',
-                background: 'rgba(0,113,227,0.12)',
+                background: 'rgba(var(--accent-primary-rgb), 0.12)',
                 color: 'var(--accent-primary)', cursor: 'pointer',
                 fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-display)',
                 transition: 'all 0.2s',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,113,227,0.22)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,113,227,0.12)' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(var(--accent-primary-rgb), 0.22)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(var(--accent-primary-rgb), 0.12)' }}
             >
               触发复评
             </button>
@@ -439,8 +481,8 @@ const PathTab: FC<Props> = ({ growthPath, diagnosisId, studentId, onTaskComplete
       {reEvalRunning && (
         <div style={{
           padding: 16, borderRadius: 10,
-          border: '1px solid rgba(0,113,227,0.25)',
-          background: 'rgba(0,113,227,0.04)',
+          border: '1px solid rgba(var(--accent-primary-rgb), 0.25)',
+          background: 'rgba(var(--accent-primary-rgb), 0.04)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div style={{
