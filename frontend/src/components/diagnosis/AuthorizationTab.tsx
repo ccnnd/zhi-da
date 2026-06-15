@@ -5,7 +5,8 @@ import {
   getStudentAuthorizations,
   createStudentAuthorization,
   deleteStudentAuthorization,
-  batchCreateStudentAuthorization
+  batchCreateStudentAuthorization,
+  getStudentJobDetail
 } from '../../services/api'
 
 interface AuthorizationTabProps {
@@ -20,6 +21,31 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
   const [actionId, setActionId] = useState<string | null>(null)
   const [showOtherJobs, setShowOtherJobs] = useState(false)
   const [batchAuthorizing, setBatchAuthorizing] = useState(false)
+
+  // 岗位详情展开
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
+  const [jobDetail, setJobDetail] = useState<any>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
+
+  const toggleJobDetail = async (jobId: string) => {
+    if (expandedJobId === jobId && jobDetail) {
+      setExpandedJobId(null)
+      return
+    }
+    setExpandedJobId(jobId)
+    if (jobDetail && jobDetail.id === jobId) return
+    setDetailLoading(true)
+    setDetailError('')
+    try {
+      const data = await getStudentJobDetail(jobId)
+      setJobDetail(data)
+    } catch (err: any) {
+      setDetailError(err?.message || '加载详情失败')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -103,10 +129,14 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
   }
 
   const handleRevoke = async (auth: any) => {
+    // 撤销不可逆（企业可能已查看），需二次确认
+    const ok = window.confirm(`撤销后「${auth.job_title || '该岗位'}」的企业将无法再查看你的能力画像，确认撤销授权？`)
+    if (!ok) return
     setActionId(auth.id)
     try {
       await deleteStudentAuthorization(auth.id)
       await loadData()
+      toast.success('已撤销授权')
     } catch (err: any) {
       toast.error(`撤销授权失败: ${err.message || err}`)
     } finally {
@@ -173,6 +203,7 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
   const renderJobCard = (job: any, tier: 'target' | 'recommended' | 'other') => {
     const currentAuth = auths.find(a => a.job_title === job.title && a.enterprise_name === job.enterprise_name)
     const isAuthActive = currentAuth?.status === 'active'
+    const isExpanded = expandedJobId === job.id
 
     const borderStyle = tier === 'target'
       ? '2px solid var(--accent-primary)'
@@ -181,14 +212,14 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
         : '1px solid var(--border-light)'
 
     const bgStyle = tier === 'target'
-      ? 'rgba(0,113,227,0.04)'
+      ? 'rgba(var(--accent-primary-rgb), 0.04)'
       : isAuthActive
-        ? 'rgba(0,113,227,0.02)'
+        ? 'rgba(var(--accent-primary-rgb), 0.02)'
         : 'transparent'
 
     return (
       <div key={job.id} style={{
-        border: borderStyle,
+        border: isExpanded ? '1px solid var(--accent-primary)' : borderStyle,
         borderRadius: 12,
         padding: 16,
         display: 'flex',
@@ -196,6 +227,7 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
         gap: 10,
         background: bgStyle,
         position: 'relative',
+        transition: 'border-color 0.2s ease',
       }}>
         {tier === 'target' && (
           <div style={{
@@ -222,7 +254,7 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
           </div>
 
           {isAuthActive ? (
-            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 8, background: 'rgba(0,113,227,0.15)', color: 'var(--accent-primary)', fontWeight: 600 }}>
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 8, background: 'rgba(var(--accent-primary-rgb), 0.15)', color: 'var(--accent-primary)', fontWeight: 600 }}>
               已授权 V{currentAuth?.diagnosis_version || diagnosisResult?.version}
             </span>
           ) : (
@@ -239,6 +271,64 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
           {job.description || '暂无描述信息'}
         </div>
+
+        {/* 查看详情 */}
+        <div
+          onClick={(e) => { e.stopPropagation(); toggleJobDetail(job.id) }}
+          style={{
+            fontSize: 11, color: 'var(--accent-primary)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center',
+            borderTop: '1px solid var(--border-light)', paddingTop: 8, marginTop: 2,
+          }}
+        >
+          {isExpanded ? '收起详情 ▲' : '查看岗位详情 ▼'}
+        </div>
+
+        {/* 展开详情区 */}
+        {isExpanded && (
+          <div style={{ marginTop: 4, padding: 14, background: 'var(--bg-hover)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }} onClick={e => e.stopPropagation()}>
+            {detailLoading && <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: 16 }}>加载中...</div>}
+            {detailError && <div style={{ color: 'var(--accent-danger)', padding: 8 }}>{detailError}</div>}
+            {jobDetail && jobDetail.id === job.id && (
+              <>
+                {/* 岗位关键词 */}
+                {jobDetail.ability_model?.tech_skills && Object.keys(jobDetail.ability_model.tech_skills).length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6, letterSpacing: '0.5px', fontWeight: 600 }}>岗位关键词</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {Object.entries(jobDetail.ability_model.tech_skills).map(([k, v]: any) => (
+                        <span key={k} style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, background: 'var(--bg-card)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)' }}>{k}{v ? ` ${v}` : ''}</span>
+                      ))}
+                      {jobDetail.ability_model.domain_knowledge && Object.entries(jobDetail.ability_model.domain_knowledge).map(([k]: any) => (
+                        <span key={k} style={{ fontSize: 10, padding: '3px 8px', borderRadius: 4, background: 'var(--bg-card)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)' }}>{k}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* 岗位职责 */}
+                {jobDetail.description && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6, letterSpacing: '0.5px', fontWeight: 600 }}>岗位职责</div>
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.7 }}>{jobDetail.description}</div>
+                  </div>
+                )}
+                {/* 岗位要求 */}
+                {jobDetail.requirements_text && (
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6, letterSpacing: '0.5px', fontWeight: 600 }}>岗位要求</div>
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.7 }}>{jobDetail.requirements_text}</div>
+                  </div>
+                )}
+                {/* 企业信息 */}
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-light)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4, letterSpacing: '0.5px', fontWeight: 600 }}>企业</div>
+                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{jobDetail.enterprise_name}{jobDetail.enterprise_industry && <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 6 }}>· {jobDetail.enterprise_industry}</span>}</div>
+                  {jobDetail.enterprise_description && <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>{jobDetail.enterprise_description.slice(0, 150)}{jobDetail.enterprise_description.length > 150 ? '…' : ''}</div>}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     )
   }
@@ -424,10 +514,10 @@ export default function AuthorizationTab({ student, diagnosisResult }: Authoriza
                       fontSize: 10,
                       padding: '2px 6px',
                       borderRadius: 6,
-                      background: auth.status === 'active' ? 'rgba(0,113,227,0.12)' : 'rgba(128,128,128,0.12)',
+                      background: auth.status === 'active' ? 'rgba(var(--accent-primary-rgb), 0.12)' : 'rgba(128,128,128,0.12)',
                       color: auth.status === 'active' ? 'var(--accent-primary)' : 'var(--text-secondary)'
                     }}>
-                      {auth.status === 'active' ? '授权中' : '已撤销'}
+                      {auth.status === 'active' ? '已授权' : '已撤销'}
                     </span>
                   </div>
                   <div style={{ color: 'var(--text-secondary)', marginTop: 4 }}>意向企业：{auth.enterprise_name}</div>
