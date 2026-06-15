@@ -163,21 +163,6 @@ body {
 @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(0,113,227,0.25); } 50% { box-shadow: 0 0 0 8px rgba(0,113,227,0); } }
 @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes diagPulse {
-  0%, 100% { transform: scale(1); opacity: 0.5; }
-  50% { transform: scale(1.08); opacity: 0.9; }
-}
-@keyframes diagFade {
-  0%, 18% { opacity: 0; transform: translateY(4px); }
-  25%, 75% { opacity: 1; transform: translateY(0); }
-  85%, 100% { opacity: 0; transform: translateY(-4px); }
-}
-@keyframes scanLine {
-  0% { left: 15%; opacity: 0; }
-  15% { opacity: 0.6; }
-  85% { opacity: 0.6; }
-  100% { left: 85%; opacity: 0; }
-}
 @keyframes portalSlideInLeft {
   from { opacity: 0; transform: translateX(-20px); }
   to   { opacity: 1; transform: translateX(0); }
@@ -1021,43 +1006,27 @@ body.dark .badge-danger  { color: #ff453a; }
 /* Diagnosis Loading Animation */
 .diagnosis-loading {
   display: flex; flex-direction: column; align-items: center;
-  padding: 48px 24px; gap: 28px; animation: fadeIn 0.4s ease-out;
+  padding: 48px 24px; gap: 20px; animation: fadeIn 0.3s ease-out;
 }
-.diagnosis-orb {
-  position: relative; width: 100px; height: 100px;
-  display: flex; align-items: center; justify-content: center;
+.diagnosis-bar {
+  width: 280px; height: 3px; border-radius: 2px;
+  background: var(--border-light);
+  overflow: hidden;
 }
-.diagnosis-orb-ring {
-  position: absolute; inset: 0; border-radius: 50%;
-  border: 2px solid rgba(0, 113, 227, 0.15);
-  animation: diagPulse 2.5s ease-in-out infinite;
-}
-.diagnosis-orb-ring:nth-child(2) {
-  inset: -10px; animation-delay: 0.5s;
-  border-color: rgba(0, 113, 227, 0.08);
-}
-.diagnosis-orb-icon {
-  position: relative; z-index: 1; color: var(--accent-primary);
-  animation: diagPulse 2.5s ease-in-out infinite;
+.diagnosis-bar-fill {
+  height: 100%; border-radius: 2px;
+  background: var(--accent-primary);
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .diagnosis-stage { text-align: center; }
 .diagnosis-stage-label {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  font-size: 16px; font-weight: 600; color: var(--text-primary);
+  font-size: 15px; font-weight: 600; color: var(--text-primary);
   font-family: var(--font-display); letter-spacing: 0.3px; min-height: 24px;
 }
 .diagnosis-stage-desc {
-  margin-top: 8px; font-size: 13px; color: var(--text-secondary);
-  font-family: var(--font-body); animation: diagFade 3s ease-in-out infinite; min-height: 20px;
-}
-.diagnosis-scan-line {
-  width: 200px; height: 2px; position: relative;
-  overflow: hidden; border-radius: 1px;
-}
-.diagnosis-scan-line::after {
-  content: ''; position: absolute; top: 0; width: 60%; height: 100%;
-  background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
-  animation: scanLine 2s ease-in-out infinite;
+  margin-top: 6px; font-size: 13px; color: var(--text-secondary);
+  font-family: var(--font-body); min-height: 20px;
 }
 .diagnosis-progress-text {
   font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono);

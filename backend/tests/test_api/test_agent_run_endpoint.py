@@ -165,6 +165,8 @@ class TestRunDiagnose:
              patch("core.agent.student_runtime.LLM_API_KEY", "test-key"):
             mock_runner = MagicMock()
             mock_runner.run = AsyncMock(return_value=mock_state)
+            mock_runner.run_stages = AsyncMock(return_value=mock_state)
+            mock_runner.steps = [MagicMock() for _ in range(5)]
             MockRunner.return_value = mock_runner
 
             with TestClient(app) as client:
@@ -348,6 +350,8 @@ class TestRunReEvaluate:
              patch("core.agent.student_runtime.LLM_API_KEY", "test-key"):
             mock_runner = MagicMock()
             mock_runner.run = AsyncMock(return_value=mock_state)
+            mock_runner.run_stages = AsyncMock(return_value=mock_state)
+            mock_runner.steps = [MagicMock() for _ in range(5)]
             MockRunner.return_value = mock_runner
 
             with TestClient(app) as client:
@@ -455,7 +459,7 @@ class TestRunAsk:
         mock_response = MagicMock()
         mock_response.content = "根据你的情况..."
         mock_llm = MagicMock()
-        async def capture_complete(messages):
+        async def capture_complete(messages, **kwargs):
             captured_messages.extend(messages)
             return mock_response
         mock_llm.complete = capture_complete

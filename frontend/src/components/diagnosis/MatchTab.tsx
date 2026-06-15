@@ -77,8 +77,11 @@ const MatchTab: FC<Props> = ({ matchScore, previousScore, dimensionScores, top5J
           <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 8, letterSpacing: '1px', textTransform: 'uppercase' }}>
             匹配分计算说明
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', padding: '8px 12px', background: 'var(--bg-hover)', borderRadius: 6, marginBottom: 8, wordBreak: 'break-all' }}>
-            综合分 = {matchExpl.formula || '加权求和'}
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', padding: '8px 12px', background: 'var(--bg-hover)', borderRadius: 6, marginBottom: 8, wordBreak: 'break-all' }}>
+            综合分 = {(matchExpl.formula || '加权求和').replace(
+              /tech_skills|project_exp|academic_foundation|domain_knowledge|soft_skill_evidence/g,
+              m => dimLabels[m] || m
+            )}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {Object.entries(matchExpl.weights || {}).map(([key, weight]) => (
@@ -93,9 +96,11 @@ const MatchTab: FC<Props> = ({ matchScore, previousScore, dimensionScores, top5J
           {explanations?.summary && (
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.6 }}>
               {explanations.summary.basis}
-              <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--accent-warning)' }}>
-                置信度 {(explanations.summary.confidence * 100).toFixed(0)}%
-              </span>
+              {typeof explanations.summary.confidence === 'number' && isFinite(explanations.summary.confidence) && (
+                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--accent-warning)' }}>
+                  置信度 {(explanations.summary.confidence * 100).toFixed(0)}%
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -104,8 +109,8 @@ const MatchTab: FC<Props> = ({ matchScore, previousScore, dimensionScores, top5J
       {/* 五维匹配度卡片 */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-        gap: 12,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        gap: 16,
         width: '100%',
       }}>
         {Object.entries(dimLabels).map(([key, label]) => {
@@ -157,21 +162,21 @@ const MatchTab: FC<Props> = ({ matchScore, previousScore, dimensionScores, top5J
               const jPct = jScore * 100
               const barColor = jPct >= 70 ? 'var(--accent-success)' : jPct >= 40 ? 'var(--accent-warning)' : 'var(--accent-primary)'
               return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-light)', background: 'var(--bg-card)' }}>
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 8, border: '1px solid var(--border-light)', background: 'var(--bg-card)' }}>
                   <span style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--bg-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{i + 1}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{job.title} {job.company && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>@{job.company}</span>}</div>
-                    {job.reason && <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>{job.reason}</div>}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                    {job.reason && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, lineHeight: 1.5 }}>{job.reason}</div>}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
                       {job.matched_skills?.map((s: string) => (
-                        <span key={s} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(52,199,89,0.15)', color: 'var(--accent-success)' }}>{s}</span>
+                        <span key={s} style={{ fontSize: 11, padding: '2px 7px', borderRadius: 4, background: 'rgba(var(--accent-success-rgb), 0.15)', color: 'var(--accent-success)' }}>{s}</span>
                       ))}
                       {job.missing_skills?.map((s: string) => (
-                        <span key={s} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(255,149,0,0.15)', color: 'var(--accent-warning)' }}>{s}</span>
+                        <span key={s} style={{ fontSize: 11, padding: '2px 7px', borderRadius: 4, background: 'rgba(var(--accent-warning-rgb), 0.15)', color: 'var(--accent-warning)' }}>{s}</span>
                       ))}
                     </div>
-                    <div style={{ height: 4, borderRadius: 2, background: 'var(--border-light)', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', borderRadius: 2, width: `${jPct}%`, background: barColor, transition: 'width 0.8s ease' }} />
+                    <div style={{ height: 8, borderRadius: 4, background: 'var(--border-light)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', borderRadius: 4, width: `${jPct}%`, background: barColor, transition: 'width 0.8s ease' }} />
                     </div>
                   </div>
                   <span style={{ fontSize: 14, fontWeight: 700, color: barColor, fontFamily: "var(--font-display)", minWidth: 44, textAlign: 'right' }}>{jPct.toFixed(0)}%</span>

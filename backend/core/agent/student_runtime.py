@@ -100,10 +100,22 @@ class StudentAgentRuntime:
         )
         return prev_result.scalar_one_or_none()
 
-    def _build_pipeline_runner(self) -> PipelineRunner:
-        """创建标准 5 步 pipeline runner，使用 FallbackHandler 进行异常降级。"""
+    def _build_pipeline_runner(self, db: AsyncSession | None = None) -> PipelineRunner:
+        """创建标准 Pipeline runner，PathStep 和 AdviceStep 并行执行以缩短等待时间。
+
+        Args:
+            db: 异步数据库会话，传给 MatchStep 用于加载真实岗位数据。
+
+        执行顺序：profile → match → gap → [path ∥ advice]
+        """
         return PipelineRunner(
-            steps=[ProfileStep(), MatchStep(), GapStep(), PathStep(), AdviceStep()],
+            steps=[
+                ProfileStep(depends_on=[]),
+                MatchStep(db=db, depends_on=["profile"]),
+                GapStep(depends_on=["match"]),
+                PathStep(depends_on=["match"]),
+                AdviceStep(depends_on=["match"]),
+            ],
             fallback_handler=FallbackHandler().handle,
         )
 
@@ -119,6 +131,8 @@ class StudentAgentRuntime:
         on_progress=None,
     ) -> tuple:
         """执行诊断 pipeline 并保存结果（共享核心逻辑）。
+
+        使用 run_stages 分阶段执行，PathStep 和 AdviceStep 并行以缩短总耗时。
 
         Args:
             db: 数据库会话。
@@ -137,8 +151,11 @@ class StudentAgentRuntime:
             "previous_dimension_scores": prev_diag.dimension_scores if prev_diag else {},
         })
 
-        runner = self._build_pipeline_runner()
-        state_out = await runner.run(state, on_progress=on_progress)
+        runner = self._build_pipeline_runner(db)
+
+        # 分阶段执行：前 3 步串行，后 2 步（path + advice）并行
+        stages = runner.steps[:3] + [runner.steps[3:]]  # [profile, match, gap, [path, advice]]
+        state_out = await runner.run_stages(stages, state, on_progress=on_progress)
 
         # 保存诊断
         diag_response = await diagnosis_service.save_diagnosis(

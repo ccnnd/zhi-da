@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../stores/appStore'
-import { getDiagnosisHistory, getStudent, runStudentAgentStream } from '../services/api'
+import { getDiagnosisHistory, getStudent, runStudentAgentStream, getGrowthTasks } from '../services/api'
 import type { DiagnosisResult, AbilityProfile, AbilityDimension, NextAction } from '../types'
 import ProgressSteps from '../components/shared/ProgressSteps'
 import ReEvaluatePrompt from '../components/shared/ReEvaluatePrompt'
@@ -124,6 +124,15 @@ const buildProfile = (result: any, studentData?: any): AbilityProfile => {
 
 // ─── SSE 共享工具函数 ───────────────────────────────
 
+// 后端 stage 名称 → 前端步骤标签映射
+const stageNameToLabel: Record<string, string> = {
+  profile: '数据采集',
+  match: '能力分析',
+  gap: '岗位匹配',
+  path: '路径规划',
+  advice: '生成建议',
+}
+
 /** 根据 Agent Stream 进度回调更新 SSE 步骤状态和全局进度 */
 const makeSseProgressUpdater = (
   setSseSteps: React.Dispatch<React.SetStateAction<{ label: string; status: 'wait' | 'process' | 'finish' | 'error' }[]>>,
@@ -131,7 +140,11 @@ const makeSseProgressUpdater = (
 ) => (stage: string, pct: number, msg: string) => {
   setProgress({ stage, progress: pct, message: msg })
   setSseSteps(prev => {
-    const idx = prev.findIndex(s => s.label.includes(stage) || stage.includes(s.label))
+    // 先尝试精确匹配映射表，再 fallback 到 includes 模糊匹配
+    const mappedLabel = stageNameToLabel[stage]
+    const idx = mappedLabel
+      ? prev.findIndex(s => s.label === mappedLabel)
+      : prev.findIndex(s => s.label.includes(stage) || stage.includes(s.label))
     if (idx >= 0) {
       return prev.map((s, i) => ({
         ...s,
@@ -217,6 +230,8 @@ export default function Dashboard() {
   const [showReEval, setShowReEval] = useState(false)
   const [reEvalMsg, setReEvalMsg] = useState('')
   const [nextActions, setNextActions] = useState<NextAction[]>([])
+  // 真实成长任务进度（从 GrowthTask API 加载，避免 OverviewTab 显示陈旧快照）
+  const [taskStats, setTaskStats] = useState<{ completed: number; total: number } | null>(null)
   const [conversationOpen, setConversationOpen] = useState(false)
 
   // 区分初始化恢复状态，解决刷新重复诊断的 race condition
@@ -240,30 +255,51 @@ export default function Dashboard() {
 
   // 处理 next_action 点击
   const handleNextAction = useCallback((action: NextAction) => {
-    if (action.intent === 'navigate') {
-      const target = action.payload?.target
-      switch (target) {
-        case 'authorization_tab':
-          setActiveTab('authorization')
-          break
-        case 'match_tab':
-        case 'diagnosis':
+    // 非导航类意图：映射到对应 Tab 或操作
+    if (action.intent !== 'navigate') {
+      switch (action.intent) {
+        case 'diagnose':
+          // 触发诊断：切到诊断 Tab 并提示
           setActiveTab('diagnosis')
+          toast.info('正在准备诊断...')
           break
-        case 'growth_tab':
-        case 'growth_tasks':
+        case 'continue_growth':
           setActiveTab('tasks')
           break
-        case 'dashboard':
-        case 'profile':
-          setActiveTab('overview')
+        case 're_evaluate':
+          setActiveTab('tasks')
           break
-        case 'profile_input':
-          navigate('/student/input', { state: { fromDashboard: true } })
+        case 'ask':
+          setConversationOpen(true)
           break
         default:
-          break
+          toast.info(action.label || '操作已记录')
       }
+      return
+    }
+    const target = action.payload?.target
+    switch (target) {
+      case 'authorization_tab':
+        setActiveTab('authorization')
+        break
+      case 'match_tab':
+      case 'diagnosis':
+        setActiveTab('diagnosis')
+        break
+      case 'growth_tab':
+      case 'growth_tasks':
+        setActiveTab('tasks')
+        break
+      case 'dashboard':
+      case 'profile':
+        setActiveTab('overview')
+        break
+      case 'profile_input':
+        navigate('/student/input', { state: { fromDashboard: true } })
+        break
+      default:
+        // 未知 target：给出反馈而非静默吞掉，便于联调发现契约不一致
+        toast.info('该操作暂不支持，请稍后再试')
     }
   }, [navigate])
 
@@ -388,6 +424,8 @@ export default function Dashboard() {
 
   // 防止 React StrictMode 或竞态导致重复触发诊断
   const diagnosisTriggeredRef = useRef(false)
+  // 允许用户取消自动诊断
+  const autoDiagnosisCancelledRef = useRef(false)
 
   // 2. 初始化恢复完成后，通过 Agent Stream API 判断是否需要诊断
   useEffect(() => {
@@ -401,6 +439,8 @@ export default function Dashboard() {
         .then((result) => {
           setDiagnosing(false)
           setIsLoading(false)
+          // 用户已取消，忽略结果
+          if (autoDiagnosisCancelledRef.current) return
           if (result.action === 'ask_for_info') {
             setAgentFollowup({
               questions: result.data?.followup_questions || [],
@@ -420,6 +460,7 @@ export default function Dashboard() {
         .catch((err) => {
           setDiagnosing(false)
           setIsLoading(false)
+          if (autoDiagnosisCancelledRef.current) return
           const msg = err?.message || '诊断失败，请检查网络连接后重试'
           setDiagnosisError(msg)
         })
@@ -435,6 +476,19 @@ export default function Dashboard() {
         ))
         .catch(() => { console.warn('加载诊断历史失败') })
     }
+  }, [student, diagnosisResult])
+
+  // 加载真实成长任务进度（供 OverviewTab 展示准确数字，而非诊断快照）
+  useEffect(() => {
+    if (!student || !diagnosisResult) return
+    getGrowthTasks(student.id, diagnosisResult.id)
+      .then((tasks: any[]) => {
+        if (Array.isArray(tasks)) {
+          const completed = tasks.filter((t) => t.status === 'completed').length
+          setTaskStats({ completed, total: tasks.length })
+        }
+      })
+      .catch(() => { /* 任务进度加载失败不阻塞主流程 */ })
   }, [student, diagnosisResult])
 
 
@@ -511,14 +565,6 @@ export default function Dashboard() {
 
       return (
         <div className="diagnosis-loading">
-          <div className="diagnosis-orb">
-            <div className="diagnosis-orb-ring" />
-            <div className="diagnosis-orb-ring" />
-            <div className="diagnosis-orb-icon">
-              {meta?.icon ?? <Scan size={28} />}
-            </div>
-          </div>
-
           <div className="diagnosis-stage">
             <div className="diagnosis-stage-label">
               {meta?.icon}
@@ -529,15 +575,30 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <div className="diagnosis-bar">
+            <div className="diagnosis-bar-fill" style={{ width: `${pct}%` }} />
+          </div>
+
           <ProgressSteps steps={steps} />
 
-          <div className="diagnosis-scan-line" />
+          <div className="diagnosis-progress-text">
+            {progress.message || `${pct}% 完成`}
+          </div>
 
-          {progress.message && (
-            <div className="diagnosis-progress-text">{progress.message}</div>
-          )}
-          {!progress.message && (
-            <div className="diagnosis-progress-text">{pct}% 完成</div>
+          {!diagnosisResult && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                autoDiagnosisCancelledRef.current = true
+                setDiagnosing(false)
+                setIsLoading(false)
+                setDiagnosisError('')
+                toast.info('已取消自动诊断，你可以稍后手动发起')
+              }}
+              style={{ marginTop: 8, fontSize: 12, color: 'var(--text-tertiary)' }}
+            >
+              取消诊断
+            </button>
           )}
         </div>
       )
@@ -646,6 +707,9 @@ export default function Dashboard() {
             student={student!}
             growthPath={diagnosisResult.growth_path}
             diagnosisHistory={diagnosisHistory.length > 0 ? diagnosisHistory : [diagnosisResult]}
+            taskStats={taskStats}
+            onNavigateToTasks={() => setActiveTab('tasks')}
+            onNavigateToDiagnosis={() => setActiveTab('diagnosis')}
           />
         )
       case 'diagnosis':
@@ -670,11 +734,29 @@ export default function Dashboard() {
                 const history = await getDiagnosisHistory(student.id)
                 if (history && history.length > 0) {
                   const normalized = history.map(normalizeDiagnosisResult)
+                  // 计算匹配分变化，给用户正向反馈
+                  const prevScore = diagnosisResult?.match_score ?? 0
+                  const newScore = normalized[0]?.match_score ?? 0
+                  const delta = newScore - prevScore
                   if (diagnosisResult) {
                     setDiagnosisHistory([...diagnosisHistory, diagnosisResult])
                   }
                   setDiagnosisResult(normalized[0])
                   setDiagnosisHistory(normalized)
+                  // 更新 next_actions，让 AIReasoningPanel 的"下一步"按钮继续可用
+                  setNextActions([
+                    { label: '查看能力变化', intent: 'navigate', payload: { target: 'diagnosis' } },
+                    { label: '继续成长任务', intent: 'continue_growth', payload: {} },
+                  ])
+                  // 自动跳转到诊断 Tab，让用户看到复评带来的提升
+                  setActiveTab('diagnosis')
+                  if (delta > 0.001) {
+                    toast.success(`复评完成，匹配分提升 ${(delta * 100).toFixed(1)}%！`)
+                  } else if (delta < -0.001) {
+                    toast.info('复评完成，能力画像已更新')
+                  } else {
+                    toast.success('复评完成，能力画像已更新')
+                  }
                 }
                 setReEvalMsg('复评完成，能力画像已更新。')
                 setShowReEval(false)
@@ -702,7 +784,7 @@ export default function Dashboard() {
           color: var(--accent-primary);
         }
         .bento-topbar .btn-rediagnose:hover {
-          background: rgba(0,113,227,0.12);
+          background: rgba(var(--accent-primary-rgb), 0.12);
           box-shadow: none;
         }
         .bento-success-toast .toast-action:hover {
@@ -752,7 +834,7 @@ export default function Dashboard() {
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               border: '1px solid var(--accent-primary)',
-              background: 'rgba(0,113,227,0.08)',
+              background: 'rgba(var(--accent-primary-rgb), 0.08)',
               color: 'var(--accent-primary)',
               fontSize: 12, fontWeight: 600,
               fontFamily: 'var(--font-display)', letterSpacing: '0.5px',
@@ -784,7 +866,8 @@ export default function Dashboard() {
       {/* Content area */}
       <div className="bento-content">
         <div style={{ maxWidth: 1200, margin: '0 auto', width: '100%' }}>
-          {diagnosisResult?.reasoning && <AIReasoningPanel reasoning={diagnosisResult.reasoning} nextActions={nextActions} onNextAction={handleNextAction} />}
+          {/* AI 依据面板：仅在诊断/总览 Tab 显示，操作型 Tab（任务/授权）隐藏，避免挤压内容 */}
+          {diagnosisResult?.reasoning && (activeTab === 'overview' || activeTab === 'diagnosis') && <AIReasoningPanel reasoning={diagnosisResult.reasoning} nextActions={nextActions} onNextAction={handleNextAction} />}
           {renderTabContent()}
         </div>
       </div>
@@ -833,23 +916,23 @@ export default function Dashboard() {
           height: 52,
           borderRadius: '50%',
           border: 'none',
-          background: 'var(--accent-primary, #0071e3)',
+          background: 'var(--accent-primary, var(--accent-primary))',
           color: '#fff',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 4px 16px rgba(0,113,227,0.35)',
+          boxShadow: '0 4px 16px rgba(var(--accent-primary-rgb), 0.35)',
           zIndex: 997,
           transition: 'transform 0.2s, box-shadow 0.2s',
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'scale(1.08)'
-          e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,113,227,0.45)'
+          e.currentTarget.style.boxShadow = '0 6px 20px rgba(var(--accent-primary-rgb), 0.45)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'scale(1)'
-          e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,113,227,0.35)'
+          e.currentTarget.style.boxShadow = '0 4px 16px rgba(var(--accent-primary-rgb), 0.35)'
         }}
         title="AI 助手对话"
       >

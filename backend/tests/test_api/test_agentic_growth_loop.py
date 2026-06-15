@@ -189,6 +189,8 @@ class TestAgenticGrowthLoop:
                  patch("core.agent.student_runtime.PipelineRunner") as MockRunner:
                 mock_runner = MagicMock()
                 mock_runner.run = AsyncMock(return_value=mock_state)
+                mock_runner.run_stages = AsyncMock(return_value=mock_state)
+                mock_runner.steps = [MagicMock() for _ in range(5)]
                 MockRunner.return_value = mock_runner
 
                 diag_resp = _run_post(client, sid, "diagnose", headers=h)
@@ -244,6 +246,8 @@ class TestAgenticGrowthLoop:
                  patch("core.agent.student_runtime.PipelineRunner") as MockRunner2:
                 mock_runner2 = MagicMock()
                 mock_runner2.run = AsyncMock(return_value=mock_state2)
+                mock_runner2.run_stages = AsyncMock(return_value=mock_state2)
+                mock_runner2.steps = [MagicMock() for _ in range(5)]
                 MockRunner2.return_value = mock_runner2
 
                 reeval_resp = _run_post(client, sid, "re_evaluate", {"task_id": task_id}, headers=h)
